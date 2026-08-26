@@ -19,7 +19,7 @@ const data: DataPoint[] = [
 
 const ORIGINAL_WIDTH = 960;
 const ORIGINAL_HEIGHT = 500;
-const RADIUS = 34;
+const RADIUS = 23;
 
 export function ResponsivePseudoScatterPlot() {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -37,6 +37,7 @@ export function ResponsivePseudoScatterPlot() {
       .selectAll('circle')
       .data(data)
       .join('circle')
+      .attr('fill', 'red')
       .attr('cx', (d: DataPoint) => xScale(d.x))
       .attr('cy', (d: DataPoint) => yScale(d.y))
       .attr('r', RADIUS);
