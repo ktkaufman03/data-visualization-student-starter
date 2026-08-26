@@ -29,6 +29,7 @@ export function ResponsivePseudoScatterPlot() {
     const svg = svgRef.current;
     if (!svg || dimensions.width === 0 || dimensions.height === 0) return;
 
+    
     const xScale = scaleLinear().domain([0, ORIGINAL_WIDTH]).range([0, dimensions.width]);
 
     const yScale = scaleLinear().domain([0, ORIGINAL_HEIGHT]).range([0, dimensions.height]);
