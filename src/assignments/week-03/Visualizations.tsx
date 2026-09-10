@@ -115,7 +115,7 @@ export function Visualizations() {
             <p>
                 Breakdown by Species:
                 <ul>
-                    {summary?.species_breakdown?.map(sb => <li>{sb.species}: {sb.count}</li>)}
+                    {summary?.species_breakdown?.map((sb, i) => <li><span style={{"color": colors[i] || '#000000'}}>{sb.species}</span>: {sb.count}</li>)}
                 </ul>
             </p>
         </div>
