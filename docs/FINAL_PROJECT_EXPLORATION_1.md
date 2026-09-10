@@ -39,3 +39,13 @@ Some things I've been thinking about but haven't figured out how to represent ye
 - Relating observations with weather (getting historical data might be complicated)
 - Making the maps more interactive ("click a point to see a bunny" ?)
 - Clearly differentiating species (different colors? icons?)
+
+## Task Analysis
+
+I want to achieve several things.
+
+First, I want to analyze how the New England Cottontail population is evolving over time. I want to determine if there are "hotspots" where they are seen in higher-than-usual numbers, and identify other potential patterns in where/when they appear.
+
+Second, I want to identify general trends in the cottontail population in New England - including the Eastern Cottontail, which is far more prevalent than the New England Cottontail. I am particularly interested in correlating observations with local weather, as well as with observations of common predators.
+
+Third, I want to identify areas that don't seem to align with some or all of the discovered trends, because this could tell us interesting things about biodiversity throughout New England.
