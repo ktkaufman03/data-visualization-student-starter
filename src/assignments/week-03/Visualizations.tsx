@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import * as d3 from 'd3';
 import { csvParse } from 'd3-dsv';
 import { useDimensions } from '../../helpers/useDimensions';
@@ -26,11 +26,7 @@ interface CottontailRow {
 
 const DATA_URL = `${import.meta.env.BASE_URL}/data/inaturalist-ne-cottontails/0000410-260903112359142.csv`;
 
-const FONT_SIZE = 28;
-const LINE_HEIGHT = FONT_SIZE * 1.2;
-
 export function Visualizations() {
-    const svgRef = useRef<SVGSVGElement>(null);
     const { ref: divRef, dimensions } = useDimensions();
     const [data, setData] = useState<CottontailRow[] | null>(null);
 
