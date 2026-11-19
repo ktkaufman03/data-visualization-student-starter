@@ -8,6 +8,8 @@ import statesTopology from 'us-atlas/states-10m.json';
 import type { CottontailRow } from './types';
 import { speciesColor } from './species';
 import { DensityHeatmap } from './DensityHeatmap';
+import { TimeRangeSlider, type TimeRangeSliderProps } from './TimeRangeSlider';
+import { useTimeFilter } from './useTimeFilter';
 
 // google maps demo key
 const MAPS_API_KEY: string = 'AIzaSyC23xtNxenZmWJ0yz_uW5A_nZnDi1Mz9NE';
@@ -259,33 +261,14 @@ function speciesMixGradient(species: string[]) {
     return `linear-gradient(to right, ${d3.range(0, 1.01, 0.1).map((t) => mix(t)).join(", ")})`;
 }
 
-// Months are counted from year 0 so a month/year pair is a single slider value.
-const monthIndex = (d: CottontailRow) => d.year * 12 + (d.month - 1);
-const formatMonth = (i: number) => d3.timeFormat("%b %Y")(new Date(Math.floor(i / 12), i % 12));
-
 interface MapSettingsProps {
     mode: MapMode;
     onModeChange: (mode: MapMode) => void;
-    extent: [number, number];
-    range: [number, number];
-    onRangeChange: (range: [number, number]) => void;
+    timeSlider: TimeRangeSliderProps | null;
 }
 
-function MapSettings({ mode, onModeChange, extent, range, onRangeChange }: MapSettingsProps) {
+function MapSettings({ mode, onModeChange, timeSlider }: MapSettingsProps) {
     const radioName = useId();
-    const [min, max] = extent;
-    const [lo, hi] = range;
-    const pct = (v: number) => (max === min ? 0 : ((v - min) / (max - min)) * 100);
-
-    // Two range inputs stacked on one track. The inputs ignore the mouse and only their
-    // thumbs catch it, so either thumb can be grabbed.
-    const thumb = "pointer-events-none absolute inset-0 m-0 h-full w-full appearance-none bg-transparent " +
-        "[&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 " +
-        "[&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-black " +
-        "[&::-webkit-slider-thumb]:cursor-pointer " +
-        "[&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 " +
-        "[&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-black " +
-        "[&::-moz-range-thumb]:cursor-pointer";
 
     return (
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
@@ -305,80 +288,26 @@ function MapSettings({ mode, onModeChange, extent, range, onRangeChange }: MapSe
                 ))}
             </div>
 
-            <div className="flex items-center gap-3">
-                <span className="w-16 text-right tabular-nums">{formatMonth(lo)}</span>
-                <div className="relative h-5 w-64">
-                    <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded bg-gray-200" />
-                    <div
-                        className="absolute top-1/2 h-1 -translate-y-1/2 rounded bg-gray-500"
-                        style={{ left: `${pct(lo)}%`, right: `${100 - pct(hi)}%` }}
-                    />
-                    <input
-                        type="range"
-                        min={min}
-                        max={max}
-                        value={lo}
-                        aria-label="Earliest month"
-                        aria-valuetext={formatMonth(lo)}
-                        onChange={(e) => onRangeChange([Math.min(+e.target.value, hi), hi])}
-                        className={thumb}
-                        // When the thumbs meet near the right end, the start thumb must be on top
-                        // or it could never be dragged back out.
-                        style={{ zIndex: lo > (min + max) / 2 ? 2 : 1 }}
-                    />
-                    <input
-                        type="range"
-                        min={min}
-                        max={max}
-                        value={hi}
-                        aria-label="Latest month"
-                        aria-valuetext={formatMonth(hi)}
-                        onChange={(e) => onRangeChange([lo, Math.max(+e.target.value, lo)])}
-                        className={thumb}
-                    />
-                </div>
-                <span className="w-16 tabular-nums">{formatMonth(hi)}</span>
-            </div>
+            {timeSlider && <TimeRangeSlider {...timeSlider} />}
         </div>
     );
 }
 
+// Missing coordinates parse as NaN (or 0 for empty strings), and an unknown species
+// has no color, so skip both.
+const isMappable = (d: CottontailRow) => d.decimalLatitude && d.decimalLongitude && d.species !== "Unknown";
+
 export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
     const [mode, setMode] = useState<MapMode>("points");
-    // null means the full date range; set once the slider is first moved.
-    const [range, setRange] = useState<[number, number] | null>(null);
-    const [appliedRange, setAppliedRange] = useState<[number, number] | null>(null);
+    // This tab's own time range, independent of the Bars tab.
+    const { filtered, timeSlider } = useTimeFilter(data);
 
-    // Missing coordinates parse as NaN (or 0 for empty strings), and an unknown species
-    // has no color, so skip both.
-    const points = useMemo(
-        () => data?.filter((d) => d.decimalLatitude && d.decimalLongitude && d.species !== "Unknown") ?? [],
+    // From all observations, not just the visible ones, so each species keeps its color when filtered.
+    const species = useMemo(
+        () => Array.from(new Set((data ?? []).filter(isMappable).map((d) => d.species))).sort(d3.ascending),
         [data]
     );
-    // From all points, not just the visible ones, so each species keeps its color when filtered.
-    const species = useMemo(
-        () => Array.from(new Set(points.map((d) => d.species))).sort(d3.ascending),
-        [points]
-    );
-
-    // The slider spans the earliest to latest month in the whole dataset.
-    const extent = useMemo<[number, number] | null>(() => {
-        const [min, max] = d3.extent(data ?? [], monthIndex);
-        return min === undefined || max === undefined ? null : [min, max];
-    }, [data]);
-
-    // Re-clustering 16k points on every slider step would stall the map, so the filter is
-    // applied once the slider has been still for a moment.
-    useEffect(() => {
-        const timeout = setTimeout(() => setAppliedRange(range), 250);
-        return () => clearTimeout(timeout);
-    }, [range]);
-
-    const visiblePoints = useMemo(() => {
-        if (!appliedRange) return points;
-        const [lo, hi] = appliedRange;
-        return points.filter((d) => monthIndex(d) >= lo && monthIndex(d) <= hi);
-    }, [points, appliedRange]);
+    const visiblePoints = useMemo(() => (filtered ?? []).filter(isMappable), [filtered]);
 
     return (
         <div className="flex flex-col w-full h-full gap-2">
@@ -399,15 +328,7 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
                 )}
             </div>
 
-            {extent && (
-                <MapSettings
-                    mode={mode}
-                    onModeChange={setMode}
-                    extent={extent}
-                    range={range ?? extent}
-                    onRangeChange={setRange}
-                />
-            )}
+            <MapSettings mode={mode} onModeChange={setMode} timeSlider={timeSlider} />
 
             <div className="flex-1 min-h-0 overflow-hidden rounded">
                 <APIProvider apiKey={MAPS_API_KEY}>

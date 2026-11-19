@@ -3,6 +3,8 @@ import * as d3 from 'd3';
 import { useDimensions } from '../../helpers/useDimensions';
 import type { CottontailRow } from './types';
 import { speciesColor } from './species';
+import { TimeRangeSlider } from './TimeRangeSlider';
+import { useTimeFilter } from './useTimeFilter';
 
 interface BreakdownEntry {
     stateProvince: string;
@@ -12,11 +14,15 @@ interface BreakdownEntry {
 
 interface Summary {
     rows: number;
-    columns: number;
     states: string[];
     species: string[];
     breakdown: BreakdownEntry[];
+    // Largest count over the whole dataset, so the y-axis stays put as the time filter changes.
+    maxCount: number;
 }
+
+// Rows missing a state or species don't tell us much, so leave them out.
+const isKnown = (d: CottontailRow) => d.stateProvince !== "Unknown" && d.species !== "Unknown";
 
 const MARGIN = { top: 16, right: 16, bottom: 40, left: 56 };
 const MAX_BAR_WIDTH = 48;
@@ -28,6 +34,8 @@ function barPath(x: number, y: number, width: number, height: number, radius: nu
 }
 
 export function SpeciesBarChart({ data }: { data: CottontailRow[] | null }) {
+    // This tab's own time range, independent of the Geography tab.
+    const { filtered, timeSlider } = useTimeFilter(data);
     const { ref: divRef, dimensions } = useDimensions();
     const [hovered, setHovered] = useState<BreakdownEntry | null>(null);
     const [hoveredSpecies, setHoveredSpecies] = useState<string | null>(null);
@@ -45,36 +53,41 @@ export function SpeciesBarChart({ data }: { data: CottontailRow[] | null }) {
         setHovered((h) => (h?.species === species ? null : h));
     };
 
-    const summary = useMemo<Summary | null>(() => {
-        if (!data) return null;
-
-        // Rows missing a state or species don't tell us much, so leave them out.
-        const known = data.filter((d) => d.stateProvince !== "Unknown" && d.species !== "Unknown");
-
-        const counts = d3.rollup(known, (v) => v.length, (d) => d.stateProvince, (d) => d.species);
+    // The states, species and axis come from the whole dataset, so bars don't reorder, change
+    // color or rescale while the time filter is dragged.
+    const categories = useMemo(() => {
+        const known = (data ?? []).filter(isKnown);
         const stateTotals = d3.rollup(known, (v) => v.length, (d) => d.stateProvince);
+        const counts = d3.rollup(known, (v) => v.length, (d) => d.stateProvince, (d) => d.species);
 
-        // States go from most to least observations; species alphabetically.
-        const states = Array.from(stateTotals.keys())
-            .sort((a, b) => d3.descending(stateTotals.get(a)!, stateTotals.get(b)!));
-        const species = Array.from(new Set(known.map((d) => d.species)))
-            .sort(d3.ascending);
+        return {
+            // States go from most to least observations; species alphabetically.
+            states: Array.from(stateTotals.keys())
+                .sort((a, b) => d3.descending(stateTotals.get(a)!, stateTotals.get(b)!)),
+            species: Array.from(new Set(known.map((d) => d.species))).sort(d3.ascending),
+            maxCount: d3.max(counts.values(), (bySpecies) => d3.max(bySpecies.values())) ?? 0
+        };
+    }, [data]);
+
+    const summary = useMemo<Summary | null>(() => {
+        if (!data || !filtered) return null;
+
+        const known = filtered.filter(isKnown);
+        const counts = d3.rollup(known, (v) => v.length, (d) => d.stateProvince, (d) => d.species);
 
         const breakdown: BreakdownEntry[] = [];
-        for (let stateProvince of states) {
-            for (let [sp, count] of counts.get(stateProvince)!) {
+        for (const stateProvince of categories.states) {
+            for (const [sp, count] of counts.get(stateProvince) ?? []) {
                 breakdown.push({ stateProvince, species: sp, count });
             }
         }
 
         return {
             rows: known.length,
-            columns: Object.keys(data[0]).length,
-            states,
-            species,
+            ...categories,
             breakdown
         };
-    }, [data]);
+    }, [data, filtered, categories]);
 
     const colorFor = (species: string) => speciesColor(species, summary?.species || []);
 
@@ -101,7 +114,7 @@ export function SpeciesBarChart({ data }: { data: CottontailRow[] | null }) {
         // Log scale so the small counts (2-6) are visible next to the large ones (4,000+).
         // Every count is at least 1, so bars start at y = 1.
         const y = d3.scaleLog()
-            .domain([1, d3.max(summary?.breakdown || [], (d) => d.count) || 10])
+            .domain([1, summary?.maxCount || 10])
             .nice()
             .range([innerHeight, 0]);
 
@@ -118,8 +131,7 @@ export function SpeciesBarChart({ data }: { data: CottontailRow[] | null }) {
     return (
         <div className="flex flex-col w-full h-full gap-2">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-                <span>Rows: {d3.format(",")(summary?.rows || 0)}</span>
-                {summary?.species.map((sp) => {
+                <span>Rows: {d3.format(",")(summary?.rows || 0)}</span>                {summary?.species.map((sp) => {
                     const isHidden = hiddenSpecies.has(sp);
                     return (
                         <button
@@ -145,6 +157,12 @@ export function SpeciesBarChart({ data }: { data: CottontailRow[] | null }) {
                     );
                 })}
             </div>
+
+            {timeSlider && (
+                <div className="text-sm">
+                    <TimeRangeSlider {...timeSlider} />
+                </div>
+            )}
 
             <div ref={divRef} className="relative flex-1 min-h-0">
                 <svg
