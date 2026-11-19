@@ -2,9 +2,17 @@
 
 ## Info
 
+### Dataset 1 (up to week 4)
+
 Source: [GBIF](https://www.gbif.org/occurrence/search?datasetKey=50c9509d-22c7-4a22-a47d-8c48425ef4a7&taxonKey=7QR2), based on "research-grade" data from [iNaturalist](https://www.inaturalist.org/). Additional filtering (primarily location-based) was applied on the data.
 
 Citation (as requested by GBIF): GBIF.org (03 September 2026) GBIF Occurrence Download https://doi.org/10.15468/dl.rgw3ud
+
+### Dataset 2 (week 5 onwards)
+
+Source: [GBIF](https://www.gbif.org/occurrence/search?datasetKey=50c9509d-22c7-4a22-a47d-8c48425ef4a7&taxonKey=7QR2&stateProvince=Massachusetts&stateProvince=Connecticut&stateProvince=Rhode+Island&stateProvince=New+Hampshire&stateProvince=Maine&stateProvince=Vermont), based on "research-grade" data from [iNaturalist](https://www.inaturalist.org/).
+
+Citation (as requested by GBIF): GBIF.org (19 November 2026) GBIF Occurrence Download https://doi.org/10.15468/dl.ghukj7
 
 Concept: All observations of cottontail rabbits in (roughly) the New England region that were documented on iNaturalist and vetted by the community. My main reason for seeking out a dataset like this is because I'm interested in the vulnerable New England Cottontail, which has a very limited range as a result of being largely outcompeted by the Eastern Cottontail.
 

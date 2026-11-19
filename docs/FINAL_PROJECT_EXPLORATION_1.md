@@ -49,3 +49,25 @@ First, I want to analyze how the New England Cottontail population is evolving o
 Second, I want to identify general trends in the cottontail population in New England - including the Eastern Cottontail, which is far more prevalent than the New England Cottontail. I am particularly interested in correlating observations with local weather, as well as with observations of common predators.
 
 Third, I want to identify areas that don't seem to align with some or all of the discovered trends, because this could tell us interesting things about biodiversity throughout New England.
+
+## Validation Analysis
+
+### Domain
+
+The target users for this visualization are people who are interested in biodiversity, and especially people who are interested in wild rabbits. I imagine the first group is a lot larger than the second.
+
+### Abstraction
+
+At a high level, the visualization is intended to display information about the distribution of different species of cottontail rabbits in New England. This "information" is evolving as the visualization is further developed.
+
+Perhaps the user is looking at this because they have heard about the plight of the New England Cottontail (_Sylvilagus transitionalis_) and are interested in seeing where it's showing up.
+
+### Idiom
+
+As of this writing, the visual encoding is a bar chart with observations broken down by two variables: state and species. This is not the ideal final form, which I envision including an actual interactive map.
+
+There isn't much opportunity for user interaction in the bar chart visualization, other than hovering over the bars to see exact counts. My ideal final form would include more opportunities for interaction, like filtering and panning the map, and maybe incorporating a means of time scrubbing.
+
+### Algorithm
+
+As of this writing, there's not much to it. The dataset is fairly small (<20k records), and the visualization is still fairly simple, so there isn't any real algorithmic complexity.
