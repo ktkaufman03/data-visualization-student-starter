@@ -47,6 +47,7 @@ export function Interaction() {
     const { ref: divRef, dimensions } = useDimensions();
     const [data, setData] = useState<CottontailRow[] | null>(null);
     const [hovered, setHovered] = useState<BreakdownEntry | null>(null);
+    const [hoveredSpecies, setHoveredSpecies] = useState<string | null>(null);
 
     useEffect(() => {
         let cancelled = false;
@@ -143,12 +144,24 @@ export function Interaction() {
 
     const { x, xSpecies, y } = scales;
 
+    // The species being highlighted, from either a hovered bar or a hovered legend entry.
+    const activeSpecies = hovered?.species ?? hoveredSpecies;
+
     return (
         <div className="flex flex-col w-full h-full gap-2 p-4">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
                 <span>Rows: {summary?.rows || 0}</span>
                 {summary?.species.map((sp) => (
-                    <span key={sp} className="flex items-center gap-1">
+                    <span
+                        key={sp}
+                        className="flex items-center gap-1 cursor-default"
+                        onMouseEnter={() => setHoveredSpecies(sp)}
+                        onMouseLeave={() => setHoveredSpecies(null)}
+                        style={{
+                            opacity: activeSpecies && activeSpecies !== sp ? 0.25 : 1,
+                            transition: "opacity 150ms"
+                        }}
+                    >
                         <span className="inline-block w-3 h-3 rounded-sm" style={{ background: colorFor(sp) }} />
                         <i>{sp}</i>
                     </span>
@@ -174,7 +187,8 @@ export function Interaction() {
                         {summary?.breakdown.map((d) => {
                             const bx = x(d.stateProvince)! + xSpecies(d.species)!;
                             const by = y(d.count);
-                            const isHovered = hovered === d;
+                            // A hovered bar highlights only itself; a hovered legend entry highlights all of its species' bars.
+                            const isDimmed = hovered ? hovered !== d : !!hoveredSpecies && hoveredSpecies !== d.species;
                             return (
                                 <g
                                     key={`${d.stateProvince}-${d.species}`}
@@ -186,7 +200,8 @@ export function Interaction() {
                                     <path
                                         d={barPath(bx, by, xSpecies.bandwidth(), innerHeight - by, 4)}
                                         fill={colorFor(d.species)}
-                                        opacity={hovered && !isHovered ? 0.5 : 1}
+                                        opacity={isDimmed ? 0.25 : 1}
+                                        style={{ transition: "opacity 150ms" }}
                                     />
                                 </g>
                             );
