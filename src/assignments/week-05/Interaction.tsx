@@ -248,7 +248,7 @@ export function Interaction() {
 
                 {hovered && (
                     <div
-                        className="absolute pointer-events-none rounded bg-white px-2 py-1 text-sm text-black shadow"
+                        className="absolute pointer-events-none whitespace-nowrap rounded bg-white px-2 py-1 text-sm text-black shadow"
                         style={{
                             left: MARGIN.left + x(hovered.stateProvince)! + xSpecies(hovered.species)! + xSpecies.bandwidth() / 2,
                             top: MARGIN.top + y(hovered.count),
