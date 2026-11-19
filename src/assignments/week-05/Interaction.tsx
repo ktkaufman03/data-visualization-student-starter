@@ -32,7 +32,7 @@ interface CottontailRow {
     year: number;
 }
 
-const DATA_URL = `${import.meta.env.BASE_URL}/data/inaturalist-ne-cottontails/0000410-260903112359142.csv`;
+const DATA_URL = `${import.meta.env.BASE_URL}/data/inaturalist-ne-cottontails/0000876-261118162104854.csv`;
 
 const MARGIN = { top: 16, right: 16, bottom: 40, left: 56 };
 const MAX_BAR_WIDTH = 48;
@@ -48,6 +48,19 @@ export function Interaction() {
     const [data, setData] = useState<CottontailRow[] | null>(null);
     const [hovered, setHovered] = useState<BreakdownEntry | null>(null);
     const [hoveredSpecies, setHoveredSpecies] = useState<string | null>(null);
+    const [hiddenSpecies, setHiddenSpecies] = useState<Set<string>>(new Set());
+
+    const toggleSpecies = (species: string) => {
+        setHiddenSpecies((prev) => {
+            const next = new Set(prev);
+            if (next.has(species)) next.delete(species);
+            else next.add(species);
+            return next;
+        });
+        // A bar that's removed while hovered never gets onMouseLeave, so clear it here
+        // or it keeps dimming the other bars and showing its tooltip.
+        setHovered((h) => (h?.species === species ? null : h));
+    };
 
     useEffect(() => {
         let cancelled = false;
@@ -125,10 +138,13 @@ export function Interaction() {
             .paddingInner(0.2)
             .paddingOuter(0.1);
 
+        // Only visible species get a slot, so the remaining bars close up the gap.
+        const visibleSpecies = summary?.species.filter((sp) => !hiddenSpecies.has(sp)) || [];
+
         // Cap the bar width so the marks stay thin on wide screens.
-        const groupWidth = Math.min(x.bandwidth(), MAX_BAR_WIDTH * (summary?.species.length || 1));
+        const groupWidth = Math.min(x.bandwidth(), MAX_BAR_WIDTH * (visibleSpecies.length || 1));
         const xSpecies = d3.scaleBand()
-            .domain(summary?.species || [])
+            .domain(visibleSpecies)
             .range([(x.bandwidth() - groupWidth) / 2, (x.bandwidth() + groupWidth) / 2])
             .paddingInner(0.08);
 
@@ -140,32 +156,44 @@ export function Interaction() {
             .range([innerHeight, 0]);
 
         return { x, xSpecies, y };
-    }, [summary, innerWidth, innerHeight]);
+    }, [summary, hiddenSpecies, innerWidth, innerHeight]);
 
     const { x, xSpecies, y } = scales;
 
     // The species being highlighted, from either a hovered bar or a hovered legend entry.
-    const activeSpecies = hovered?.species ?? hoveredSpecies;
+    // Hovering a hidden species' legend entry highlights nothing, since it has no bars.
+    const legendSpecies = hoveredSpecies && !hiddenSpecies.has(hoveredSpecies) ? hoveredSpecies : null;
+    const activeSpecies = hovered?.species ?? legendSpecies;
 
     return (
         <div className="flex flex-col w-full h-full gap-2 p-4">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-                <span>Rows: {summary?.rows || 0}</span>
-                {summary?.species.map((sp) => (
-                    <span
-                        key={sp}
-                        className="flex items-center gap-1 cursor-default"
-                        onMouseEnter={() => setHoveredSpecies(sp)}
-                        onMouseLeave={() => setHoveredSpecies(null)}
-                        style={{
-                            opacity: activeSpecies && activeSpecies !== sp ? 0.25 : 1,
-                            transition: "opacity 150ms"
-                        }}
-                    >
-                        <span className="inline-block w-3 h-3 rounded-sm" style={{ background: colorFor(sp) }} />
-                        <i>{sp}</i>
-                    </span>
-                ))}
+                <span>Rows: {d3.format(",")(summary?.rows || 0)}</span>
+                {summary?.species.map((sp) => {
+                    const isHidden = hiddenSpecies.has(sp);
+                    return (
+                        <button
+                            key={sp}
+                            type="button"
+                            aria-pressed={!isHidden}
+                            title={isHidden ? "Show species" : "Hide species"}
+                            className={`flex items-center gap-1 cursor-pointer ${isHidden ? "line-through text-gray-400" : ""}`}
+                            onClick={() => toggleSpecies(sp)}
+                            onMouseEnter={() => setHoveredSpecies(sp)}
+                            onMouseLeave={() => setHoveredSpecies(null)}
+                            style={{
+                                opacity: activeSpecies && activeSpecies !== sp ? 0.25 : 1,
+                                transition: "opacity 150ms"
+                            }}
+                        >
+                            <span
+                                className="inline-block w-3 h-3 rounded-sm"
+                                style={{ background: isHidden ? "#c3c2b7" : colorFor(sp) }}
+                            />
+                            <i>{sp}</i>
+                        </button>
+                    );
+                })}
             </div>
 
             <div ref={divRef} className="relative flex-1 min-h-0">
@@ -184,26 +212,21 @@ export function Interaction() {
                             </g>
                         ))}
 
-                        {summary?.breakdown.map((d) => {
+                        {summary?.breakdown.filter((d) => !hiddenSpecies.has(d.species)).map((d) => {
                             const bx = x(d.stateProvince)! + xSpecies(d.species)!;
                             const by = y(d.count);
                             // A hovered bar highlights only itself; a hovered legend entry highlights all of its species' bars.
-                            const isDimmed = hovered ? hovered !== d : !!hoveredSpecies && hoveredSpecies !== d.species;
+                            const isDimmed = hovered ? hovered !== d : !!legendSpecies && legendSpecies !== d.species;
                             return (
-                                <g
+                                <path
                                     key={`${d.stateProvince}-${d.species}`}
+                                    d={barPath(bx, by, xSpecies.bandwidth(), innerHeight - by, 4)}
+                                    fill={colorFor(d.species)}
+                                    opacity={isDimmed ? 0.25 : 1}
+                                    style={{ transition: "opacity 150ms" }}
                                     onMouseEnter={() => setHovered(d)}
                                     onMouseLeave={() => setHovered(null)}
-                                >
-                                    {/* Full-height hit target so tiny bars are still hoverable */}
-                                    <rect x={bx} y={0} width={xSpecies.bandwidth()} height={innerHeight} fill="transparent" />
-                                    <path
-                                        d={barPath(bx, by, xSpecies.bandwidth(), innerHeight - by, 4)}
-                                        fill={colorFor(d.species)}
-                                        opacity={isDimmed ? 0.25 : 1}
-                                        style={{ transition: "opacity 150ms" }}
-                                    />
-                                </g>
+                                />
                             );
                         })}
 
