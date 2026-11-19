@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.2",
+    "@vis.gl/react-google-maps": "^1.10.2",
     "d3": "^7.9.0",
     "d3-array": "^3.2.4",
     "d3-dsv": "^3.0.1",
@@ -20,6 +21,7 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-router": "^7.13.2",
+    "supercluster": "^9.1.0",
     "tailwindcss": "^4.2.2"
   },
   "devDependencies": {
@@ -29,6 +31,7 @@
     "@types/d3-dsv": "^3.0.7",
     "@types/d3-scale": "^4.0.9",
     "@types/d3-selection": "^3.0.11",
+    "@types/google.maps": "^3.66.10",
     "@types/node": "^24.12.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
