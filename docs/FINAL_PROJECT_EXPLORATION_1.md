@@ -50,7 +50,7 @@ Second, I want to identify general trends in the cottontail population in New En
 
 Third, I want to identify areas that don't seem to align with some or all of the discovered trends, because this could tell us interesting things about biodiversity throughout New England.
 
-## Validation Analysis
+## Validation
 
 ### Domain
 
