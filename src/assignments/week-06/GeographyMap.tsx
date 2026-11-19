@@ -1,7 +1,10 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import * as d3 from 'd3';
 import { APIProvider, Map as GoogleMap, useMap } from '@vis.gl/react-google-maps';
 import Supercluster from 'supercluster';
+import { merge } from 'topojson-client';
+import type { GeometryCollection, Topology } from 'topojson-specification';
+import statesTopology from 'us-atlas/states-10m.json';
 import type { CottontailRow } from './types';
 import { speciesColor } from './species';
 
@@ -17,6 +20,64 @@ const NEW_ENGLAND_BOUNDS = {
     east: -66.9,
     padding: 16
 };
+
+// State FIPS codes: Connecticut, Maine, Massachusetts, New Hampshire, Rhode Island, Vermont.
+const NEW_ENGLAND_FIPS = new Set(["09", "23", "25", "33", "44", "50"]);
+
+// One outline per landmass (mainland plus islands like Nantucket), with the borders between
+// the six states merged away. Computed once when the module loads.
+const NEW_ENGLAND_OUTLINES: google.maps.LatLngLiteral[][] = (() => {
+    const topology = statesTopology as unknown as Topology<{ states: GeometryCollection }>;
+    const states = topology.objects.states.geometries.filter((g) => NEW_ENGLAND_FIPS.has(String(g.id)));
+    return merge(topology, states as Parameters<typeof merge>[1]).coordinates
+        .map((polygon) => polygon[0].map(([lng, lat]) => ({ lat, lng })));
+})();
+
+// Positive for counter-clockwise rings (treating lng as x and lat as y).
+function signedArea(ring: google.maps.LatLngLiteral[]) {
+    let sum = 0;
+    for (let i = 0; i < ring.length; i++) {
+        const a = ring[i], b = ring[(i + 1) % ring.length];
+        sum += a.lng * b.lat - b.lng * a.lat;
+    }
+    return sum / 2;
+}
+
+// Grays out everything outside New England: a world-sized polygon with New England cut out.
+// Must be rendered inside <GoogleMap> so useMap() finds the map.
+function NewEnglandMask() {
+    const map = useMap();
+
+    useEffect(() => {
+        if (!map) return;
+
+        // Clockwise around the whole world. Mercator stops at about ±85°.
+        const world = [
+            { lat: 85, lng: -179.99 }, { lat: 85, lng: 0 }, { lat: 85, lng: 179.99 },
+            { lat: -85, lng: 179.99 }, { lat: -85, lng: 0 }, { lat: -85, lng: -179.99 }
+        ];
+        // Google Maps only cuts a hole when it winds the opposite way to the outer path.
+        const worldClockwise = signedArea(world) < 0;
+        const holes = NEW_ENGLAND_OUTLINES.map((ring) =>
+            (signedArea(ring) < 0) === worldClockwise ? [...ring].reverse() : ring
+        );
+
+        const mask = new google.maps.Polygon({
+            map,
+            paths: [world, ...holes],
+            fillColor: "#4b5563",
+            fillOpacity: 0.35,
+            strokeColor: "#4b5563",
+            strokeOpacity: 0.8,
+            strokeWeight: 1,
+            clickable: false
+        });
+
+        return () => mask.setMap(null);
+    }, [map]);
+
+    return null;
+}
 
 interface PointProps {
     occurrenceID: string;
@@ -189,22 +250,133 @@ function ObservationLayer({ points, species }: { points: CottontailRow[]; specie
     return null;
 }
 
+type MapMode = "points" | "heatmap";
+
+// Months are counted from year 0 so a month/year pair is a single slider value.
+const monthIndex = (d: CottontailRow) => d.year * 12 + (d.month - 1);
+const formatMonth = (i: number) => d3.timeFormat("%b %Y")(new Date(Math.floor(i / 12), i % 12));
+
+interface MapSettingsProps {
+    mode: MapMode;
+    onModeChange: (mode: MapMode) => void;
+    extent: [number, number];
+    range: [number, number];
+    onRangeChange: (range: [number, number]) => void;
+}
+
+function MapSettings({ mode, onModeChange, extent, range, onRangeChange }: MapSettingsProps) {
+    const radioName = useId();
+    const [min, max] = extent;
+    const [lo, hi] = range;
+    const pct = (v: number) => (max === min ? 0 : ((v - min) / (max - min)) * 100);
+
+    // Two range inputs stacked on one track. The inputs ignore the mouse and only their
+    // thumbs catch it, so either thumb can be grabbed.
+    const thumb = "pointer-events-none absolute inset-0 m-0 h-full w-full appearance-none bg-transparent " +
+        "[&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 " +
+        "[&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-black " +
+        "[&::-webkit-slider-thumb]:cursor-pointer " +
+        "[&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 " +
+        "[&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-black " +
+        "[&::-moz-range-thumb]:cursor-pointer";
+
+    return (
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+            <div role="radiogroup" aria-label="Map style" className="flex items-center gap-3 rounded border border-gray-300 px-2 py-1">
+                {([["points", "Points"], ["heatmap", "Heatmap"]] as const).map(([value, label]) => (
+                    <label key={value} className="flex items-center gap-1 cursor-pointer">
+                        <input
+                            type="radio"
+                            name={radioName}
+                            value={value}
+                            checked={mode === value}
+                            onChange={() => onModeChange(value)}
+                            className="accent-black cursor-pointer"
+                        />
+                        {label}
+                    </label>
+                ))}
+            </div>
+
+            <div className="flex items-center gap-3">
+                <span className="w-16 text-right tabular-nums">{formatMonth(lo)}</span>
+                <div className="relative h-5 w-64">
+                    <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded bg-gray-200" />
+                    <div
+                        className="absolute top-1/2 h-1 -translate-y-1/2 rounded bg-gray-500"
+                        style={{ left: `${pct(lo)}%`, right: `${100 - pct(hi)}%` }}
+                    />
+                    <input
+                        type="range"
+                        min={min}
+                        max={max}
+                        value={lo}
+                        aria-label="Earliest month"
+                        aria-valuetext={formatMonth(lo)}
+                        onChange={(e) => onRangeChange([Math.min(+e.target.value, hi), hi])}
+                        className={thumb}
+                        // When the thumbs meet near the right end, the start thumb must be on top
+                        // or it could never be dragged back out.
+                        style={{ zIndex: lo > (min + max) / 2 ? 2 : 1 }}
+                    />
+                    <input
+                        type="range"
+                        min={min}
+                        max={max}
+                        value={hi}
+                        aria-label="Latest month"
+                        aria-valuetext={formatMonth(hi)}
+                        onChange={(e) => onRangeChange([lo, Math.max(+e.target.value, lo)])}
+                        className={thumb}
+                    />
+                </div>
+                <span className="w-16 tabular-nums">{formatMonth(hi)}</span>
+            </div>
+        </div>
+    );
+}
+
 export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
+    const [mode, setMode] = useState<MapMode>("points");
+    // null means the full date range; set once the slider is first moved.
+    const [range, setRange] = useState<[number, number] | null>(null);
+    const [appliedRange, setAppliedRange] = useState<[number, number] | null>(null);
+
     // Missing coordinates parse as NaN (or 0 for empty strings), and an unknown species
     // has no color, so skip both.
     const points = useMemo(
         () => data?.filter((d) => d.decimalLatitude && d.decimalLongitude && d.species !== "Unknown") ?? [],
         [data]
     );
+    // From all points, not just the visible ones, so each species keeps its color when filtered.
     const species = useMemo(
         () => Array.from(new Set(points.map((d) => d.species))).sort(d3.ascending),
         [points]
     );
 
+    // The slider spans the earliest to latest month in the whole dataset.
+    const extent = useMemo<[number, number] | null>(() => {
+        const [min, max] = d3.extent(data ?? [], monthIndex);
+        return min === undefined || max === undefined ? null : [min, max];
+    }, [data]);
+
+    // Re-clustering 16k points on every slider step would stall the map, so the filter is
+    // applied once the slider has been still for a moment.
+    useEffect(() => {
+        const timeout = setTimeout(() => setAppliedRange(range), 250);
+        return () => clearTimeout(timeout);
+    }, [range]);
+
+    const visiblePoints = useMemo(() => {
+        if (!appliedRange) return points;
+        const [lo, hi] = appliedRange;
+        return points.filter((d) => monthIndex(d) >= lo && monthIndex(d) <= hi);
+    }, [points, appliedRange]);
+
     return (
         <div className="flex flex-col w-full h-full gap-2">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-                <span>Observations: {d3.format(",")(points.length)}</span>
+                <span>Observations: {d3.format(",")(visiblePoints.length)}</span>
                 {species.map((sp) => (
                     <span key={sp} className="flex items-center gap-1">
                         <span className="inline-block w-3 h-3 rounded-full" style={{ background: speciesColor(sp, species) }} />
@@ -213,6 +385,16 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
                 ))}
             </div>
 
+            {extent && (
+                <MapSettings
+                    mode={mode}
+                    onModeChange={setMode}
+                    extent={extent}
+                    range={range ?? extent}
+                    onRangeChange={setRange}
+                />
+            )}
+
             <div className="flex-1 min-h-0 overflow-hidden rounded">
                 <APIProvider apiKey={MAPS_API_KEY}>
                     <GoogleMap
@@ -220,7 +402,8 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
                         gestureHandling="greedy"
                         style={{ width: "100%", height: "100%" }}
                     >
-                        <ObservationLayer points={points} species={species} />
+                        <NewEnglandMask />
+                        <ObservationLayer points={visiblePoints} species={species} />
                     </GoogleMap>
                 </APIProvider>
             </div>
