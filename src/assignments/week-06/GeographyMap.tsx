@@ -7,6 +7,7 @@ import type { GeometryCollection, Topology } from 'topojson-specification';
 import statesTopology from 'us-atlas/states-10m.json';
 import type { CottontailRow } from './types';
 import { speciesColor } from './species';
+import { DensityHeatmap } from './DensityHeatmap';
 
 // google maps demo key
 const MAPS_API_KEY: string = 'AIzaSyC23xtNxenZmWJ0yz_uW5A_nZnDi1Mz9NE';
@@ -252,6 +253,12 @@ function ObservationLayer({ points, species }: { points: CottontailRow[]; specie
 
 type MapMode = "points" | "heatmap";
 
+// Legend swatch for the heatmap: the species colors blended in Lab, as DensityHeatmap mixes them.
+function speciesMixGradient(species: string[]) {
+    const mix = d3.piecewise(d3.interpolateLab, species.map((sp) => speciesColor(sp, species)));
+    return `linear-gradient(to right, ${d3.range(0, 1.01, 0.1).map((t) => mix(t)).join(", ")})`;
+}
+
 // Months are counted from year 0 so a month/year pair is a single slider value.
 const monthIndex = (d: CottontailRow) => d.year * 12 + (d.month - 1);
 const formatMonth = (i: number) => d3.timeFormat("%b %Y")(new Date(Math.floor(i / 12), i % 12));
@@ -377,12 +384,19 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
         <div className="flex flex-col w-full h-full gap-2">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
                 <span>Observations: {d3.format(",")(visiblePoints.length)}</span>
-                {species.map((sp) => (
+                {mode === "points" ? species.map((sp) => (
                     <span key={sp} className="flex items-center gap-1">
                         <span className="inline-block w-3 h-3 rounded-full" style={{ background: speciesColor(sp, species) }} />
                         <i>{sp}</i>
                     </span>
-                ))}
+                )) : species.length > 0 && (
+                    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <i>{species[0]}</i>
+                        <span className="inline-block h-3 w-32 rounded-sm" style={{ background: speciesMixGradient(species) }} />
+                        <i>{species[species.length - 1]}</i>
+                        <span className="text-gray-600">· in-between colors are a mix · fainter means fewer observations</span>
+                    </span>
+                )}
             </div>
 
             {extent && (
@@ -403,7 +417,9 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
                         style={{ width: "100%", height: "100%" }}
                     >
                         <NewEnglandMask />
-                        <ObservationLayer points={visiblePoints} species={species} />
+                        {mode === "points"
+                            ? <ObservationLayer points={visiblePoints} species={species} />
+                            : <DensityHeatmap points={visiblePoints} species={species} />}
                     </GoogleMap>
                 </APIProvider>
             </div>
