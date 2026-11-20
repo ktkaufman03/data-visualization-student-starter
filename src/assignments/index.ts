@@ -5,6 +5,7 @@ import { Visualizations } from './week-03/Visualizations';
 import { UpdatedVisualizations } from './week-04/UpdatedVisualizations';
 import { Interaction } from './week-05/Interaction';
 import { ProjectV1 } from './week-06/ProjectV1';
+import { DistanceFieldWaves } from './week-07/DistanceFieldWaves';
 
 export interface Assignment {
   id: string;
@@ -42,6 +43,11 @@ export const assignments: Assignment[] = [
     id: '6',
     name: 'Week 6',
     component: ProjectV1
+  },
+  {
+    id: '7',
+    name: 'Week 7',
+    component: DistanceFieldWaves
   }
 ];
 
