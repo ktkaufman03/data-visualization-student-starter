@@ -139,7 +139,7 @@ export function SpeciesBarChart({ data }: { data: CottontailRow[] | null }) {
                             type="button"
                             aria-pressed={!isHidden}
                             title={isHidden ? "Show species" : "Hide species"}
-                            className={`flex items-center gap-1 cursor-pointer ${isHidden ? "line-through text-gray-400" : ""}`}
+                            className={`flex items-center gap-1 cursor-pointer ${isHidden ? "line-through text-gray-400 dark:text-gray-500" : ""}`}
                             onClick={() => toggleSpecies(sp)}
                             onMouseEnter={() => setHoveredSpecies(sp)}
                             onMouseLeave={() => setHoveredSpecies(null)}
@@ -150,7 +150,7 @@ export function SpeciesBarChart({ data }: { data: CottontailRow[] | null }) {
                         >
                             <span
                                 className="inline-block w-3 h-3 rounded-sm"
-                                style={{ background: isHidden ? "#c3c2b7" : colorFor(sp) }}
+                                style={{ background: isHidden ? "var(--color-chart-axis)" : colorFor(sp) }}
                             />
                             <i>{sp}</i>
                         </button>
@@ -173,8 +173,8 @@ export function SpeciesBarChart({ data }: { data: CottontailRow[] | null }) {
                     <g transform={`translate(${MARGIN.left}, ${MARGIN.top})`}>
                         {y.ticks().filter((t) => Number.isInteger(Math.log10(t))).map((t) => (
                             <g key={t} transform={`translate(0, ${y(t)})`}>
-                                <line x2={innerWidth} stroke="#e1e0d9" />
-                                <text x={-8} dy="0.32em" textAnchor="end" fontSize={12} fill="#898781">
+                                <line x2={innerWidth} className="stroke-chart-grid" />
+                                <text x={-8} dy="0.32em" textAnchor="end" fontSize={12} className="fill-chart-muted">
                                     {d3.format(",")(t)}
                                 </text>
                             </g>
@@ -198,7 +198,7 @@ export function SpeciesBarChart({ data }: { data: CottontailRow[] | null }) {
                             );
                         })}
 
-                        <line y1={innerHeight} y2={innerHeight} x2={innerWidth} stroke="#c3c2b7" />
+                        <line y1={innerHeight} y2={innerHeight} x2={innerWidth} className="stroke-chart-axis" />
                         {summary?.states.map((s) => (
                             <text
                                 key={s}
@@ -206,7 +206,7 @@ export function SpeciesBarChart({ data }: { data: CottontailRow[] | null }) {
                                 y={innerHeight + 20}
                                 textAnchor="middle"
                                 fontSize={12}
-                                fill="#52514e"
+                                className="fill-chart-label"
                             >
                                 {s}
                             </text>
@@ -216,7 +216,7 @@ export function SpeciesBarChart({ data }: { data: CottontailRow[] | null }) {
 
                 {hovered && (
                     <div
-                        className="absolute pointer-events-none whitespace-nowrap rounded bg-white px-2 py-1 text-sm text-black shadow"
+                        className="absolute pointer-events-none whitespace-nowrap rounded bg-white px-2 py-1 text-sm text-black shadow dark:bg-gray-800 dark:text-gray-100"
                         style={{
                             left: MARGIN.left + x(hovered.stateProvince)! + xSpecies(hovered.species)! + xSpecies.bandwidth() / 2,
                             top: MARGIN.top + y(hovered.count),

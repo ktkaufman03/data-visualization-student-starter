@@ -84,7 +84,7 @@ function RangeControl({ label, min, max, step, value, onChange }: RangeControlPr
                 value={value}
                 aria-label={label}
                 onChange={(e) => onChange(+e.target.value)}
-                className="w-48 accent-black"
+                className="w-48 accent-black dark:accent-white"
             />
             <span className="w-12 tabular-nums">{value}</span>
         </Control>
@@ -109,7 +109,7 @@ function RadioControl<T extends string | number>({ label, options, value, format
                             type="radio"
                             checked={option === value}
                             onChange={() => onChange(option)}
-                            className="accent-black"
+                            className="accent-black dark:accent-white"
                         />
                         {format(option)}
                     </label>
@@ -253,7 +253,7 @@ export function DistanceFieldWaves() {
                 preserveAspectRatio="xMidYMid meet"
                 role="img"
                 aria-label="Wave height by distance from the shape"
-                className="max-w-full h-auto self-start shrink-0 border border-gray-400"
+                className="max-w-full h-auto self-start shrink-0 border border-gray-400 dark:border-gray-600"
                 style={{ background: profileBackground }}
             >
                 <path ref={pathRef} stroke={color(0)} strokeWidth={2} fill={color(1)} />
@@ -287,7 +287,7 @@ export function DistanceFieldWaves() {
                 />
             </div>
 
-            <hr className="border-gray-200" />
+            <hr className="border-gray-200 dark:border-gray-700" />
 
             <h2 className="text-lg font-semibold">Mask</h2>
             <img src={splashUrl} alt="Ink splash used as the shape" className="w-[400px] max-w-full" />
@@ -299,7 +299,7 @@ export function DistanceFieldWaves() {
                         checked={maskOptions.invert}
                         aria-label="Invert"
                         onChange={(e) => setMaskOptions({ ...maskOptions, invert: e.target.checked })}
-                        className="accent-black"
+                        className="accent-black dark:accent-white"
                     />
                 </Control>
                 <Control label="Limit">
@@ -315,7 +315,7 @@ export function DistanceFieldWaves() {
                             if (e.target.value === '') return;
                             setMaskOptions({ ...maskOptions, limit: clamp(0, 255, Math.round(+e.target.value)) });
                         }}
-                        className="w-20 border border-gray-300 rounded px-1"
+                        className="w-20 border border-gray-300 rounded px-1 dark:border-gray-600"
                     />
                 </Control>
                 <RadioControl

@@ -1,6 +1,7 @@
 import { useCallback, useEffect } from 'react';
 import { useSearchParams } from 'react-router';
 import { assignments, assignmentsMap, defaultAssignment } from './assignments';
+import { ThemeToggle } from './helpers/ThemeToggle';
 
 function App() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -38,10 +39,13 @@ function App() {
   }, [toggleSidebar]);
 
   return (
-    <div className="w-screen h-screen flex bg-white">
+    <div className="w-screen h-screen flex bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100">
       {/* Left Sidebar - Navigation */}
       {!hideSidebar && (
-        <div className="w-[250px] border-r border-gray-300 p-4 overflow-y-auto">
+        <div className="w-[250px] border-r border-gray-300 p-4 overflow-y-auto dark:border-gray-700">
+          <div className="mb-4">
+            <ThemeToggle />
+          </div>
           <h2 className="text-lg font-semibold mb-4">Assignments</h2>
           <nav className="space-y-2">
             {assignments.map((assignment) => (
@@ -49,7 +53,9 @@ function App() {
                 key={assignment.id}
                 onClick={() => handleSelectAssignment(assignment.id)}
                 className={`w-full text-left px-3 py-2 rounded transition-colors ${
-                  selectedAssignmentId === assignment.id ? 'font-bold bg-gray-100' : 'hover:bg-gray-50'
+                  selectedAssignmentId === assignment.id
+                    ? 'font-bold bg-gray-100 dark:bg-gray-800'
+                    : 'hover:bg-gray-50 dark:hover:bg-gray-900'
                 }`}
               >
                 {assignment.name}

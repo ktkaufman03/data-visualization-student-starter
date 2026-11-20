@@ -17,19 +17,19 @@ export function TimeRangeSlider({ extent, range, onRangeChange }: TimeRangeSlide
     // thumbs catch it, so either thumb can be grabbed.
     const thumb = "pointer-events-none absolute inset-0 m-0 h-full w-full appearance-none bg-transparent " +
         "[&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 " +
-        "[&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-black " +
+        "[&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-black dark:[&::-webkit-slider-thumb]:bg-white " +
         "[&::-webkit-slider-thumb]:cursor-pointer " +
         "[&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 " +
-        "[&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-black " +
+        "[&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-black dark:[&::-moz-range-thumb]:bg-white " +
         "[&::-moz-range-thumb]:cursor-pointer";
 
     return (
         <div className="flex items-center gap-3">
             <span className="w-16 text-right tabular-nums">{formatMonth(lo)}</span>
             <div className="relative h-5 w-64">
-                <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded bg-gray-200" />
+                <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded bg-gray-200 dark:bg-gray-700" />
                 <div
-                    className="absolute top-1/2 h-1 -translate-y-1/2 rounded bg-gray-500"
+                    className="absolute top-1/2 h-1 -translate-y-1/2 rounded bg-gray-500 dark:bg-gray-400"
                     style={{ left: `${pct(lo)}%`, right: `${100 - pct(hi)}%` }}
                 />
                 <input

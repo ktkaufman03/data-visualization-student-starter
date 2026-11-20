@@ -5,6 +5,15 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>constructing-visualizations-2026</title>
+    <!-- Apply the saved (or OS) theme before React loads, so dark mode doesn't flash white.
+         Keep in sync with initialTheme() in src/helpers/theme.ts. -->
+    <script>
+      try {
+        var saved = localStorage.getItem('theme');
+        var dark = saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (dark) document.documentElement.classList.add('dark');
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

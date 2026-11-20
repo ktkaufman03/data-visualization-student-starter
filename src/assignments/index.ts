@@ -6,6 +6,7 @@ import { UpdatedVisualizations } from './week-04/UpdatedVisualizations';
 import { Interaction } from './week-05/Interaction';
 import { ProjectV1 } from './week-06/ProjectV1';
 import { DistanceFieldWaves } from './week-07/DistanceFieldWaves';
+import { ProjectV2 } from './week-08/ProjectV2';
 
 export interface Assignment {
   id: string;
@@ -48,9 +49,14 @@ export const assignments: Assignment[] = [
     id: '7',
     name: 'Week 7',
     component: DistanceFieldWaves
+  },
+  {
+    id: '8',
+    name: 'Week 8',
+    component: ProjectV2
   }
 ];
 
 export const assignmentsMap = new Map(assignments.map((ex) => [ex.id, ex]));
 
-export const defaultAssignment = '1';
+export const defaultAssignment = '8';

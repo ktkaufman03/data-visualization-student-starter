@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import * as d3 from 'd3';
-import { APIProvider, Map as GoogleMap, useMap } from '@vis.gl/react-google-maps';
+import { APIProvider, ColorScheme, Map as GoogleMap, useMap } from '@vis.gl/react-google-maps';
 import Supercluster from 'supercluster';
 import { merge } from 'topojson-client';
 import type { GeometryCollection, Topology } from 'topojson-specification';
@@ -10,6 +10,7 @@ import { speciesColor } from './species';
 import { DensityHeatmap } from './DensityHeatmap';
 import { TimeRangeSlider, type TimeRangeSliderProps } from './TimeRangeSlider';
 import { useTimeFilter } from './useTimeFilter';
+import { useTheme } from '../../helpers/theme';
 
 // google maps demo key
 const MAPS_API_KEY: string = 'AIzaSyC23xtNxenZmWJ0yz_uW5A_nZnDi1Mz9NE';
@@ -272,7 +273,7 @@ function MapSettings({ mode, onModeChange, timeSlider }: MapSettingsProps) {
 
     return (
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-            <div role="radiogroup" aria-label="Map style" className="flex items-center gap-3 rounded border border-gray-300 px-2 py-1">
+            <div role="radiogroup" aria-label="Map style" className="flex items-center gap-3 rounded border border-gray-300 px-2 py-1 dark:border-gray-600">
                 {([["points", "Points"], ["heatmap", "Heatmap"]] as const).map(([value, label]) => (
                     <label key={value} className="flex items-center gap-1 cursor-pointer">
                         <input
@@ -281,7 +282,7 @@ function MapSettings({ mode, onModeChange, timeSlider }: MapSettingsProps) {
                             value={value}
                             checked={mode === value}
                             onChange={() => onModeChange(value)}
-                            className="accent-black cursor-pointer"
+                            className="accent-black cursor-pointer dark:accent-white"
                         />
                         {label}
                     </label>
@@ -299,6 +300,7 @@ const isMappable = (d: CottontailRow) => d.decimalLatitude && d.decimalLongitude
 
 export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
     const [mode, setMode] = useState<MapMode>("points");
+    const { theme } = useTheme();
     // This tab's own time range, independent of the Bars tab.
     const { filtered, timeSlider } = useTimeFilter(data);
 
@@ -323,7 +325,7 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
                         <i>{species[0]}</i>
                         <span className="inline-block h-3 w-32 rounded-sm" style={{ background: speciesMixGradient(species) }} />
                         <i>{species[species.length - 1]}</i>
-                        <span className="text-gray-600">· in-between colors are a mix · fainter means fewer observations</span>
+                        <span className="text-gray-600 dark:text-gray-400">· in-between colors are a mix · fainter means fewer observations</span>
                     </span>
                 )}
             </div>
@@ -333,6 +335,10 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
             <div className="flex-1 min-h-0 overflow-hidden rounded">
                 <APIProvider apiKey={MAPS_API_KEY}>
                     <GoogleMap
+                        // Google only reads the color scheme when the map is created, so a new
+                        // theme means a new map (which also resets the view to New England).
+                        key={theme}
+                        colorScheme={theme === "dark" ? ColorScheme.DARK : ColorScheme.LIGHT}
                         defaultBounds={NEW_ENGLAND_BOUNDS}
                         gestureHandling="greedy"
                         style={{ width: "100%", height: "100%" }}

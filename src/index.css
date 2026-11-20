@@ -1,1 +1,28 @@
 @import 'tailwindcss';
+
+/* Dark mode follows a .dark class on <html> (set by the theme toggle) instead of the OS setting. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Chart chrome colors, swapped as a set in dark mode. Available as Tailwind utilities,
+   e.g. stroke-chart-grid or fill-chart-label. */
+@theme {
+  --color-chart-grid: #e1e0d9;
+  --color-chart-axis: #c3c2b7;
+  --color-chart-muted: #898781;
+  --color-chart-label: #52514e;
+}
+
+.dark {
+  --color-chart-grid: #2c2c2a;
+  --color-chart-axis: #4a4a46;
+  --color-chart-muted: #898781;
+  --color-chart-label: #c3c2b7;
+  /* Native controls (inputs, scrollbars) switch to their dark versions too. */
+  color-scheme: dark;
+}
+
+/* D3 charts that never set a fill would draw black shapes and text, which vanish on the
+   dark background. Use the text color instead; explicit fills still win. */
+svg[role='img'] {
+  fill: currentColor;
+}

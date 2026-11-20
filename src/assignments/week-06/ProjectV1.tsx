@@ -50,7 +50,7 @@ export function ProjectV1() {
 
     return (
         <div className="flex flex-col w-full h-full gap-4 p-4">
-            <div role="tablist" className="flex gap-4 border-b border-gray-200">
+            <div role="tablist" className="flex gap-4 border-b border-gray-200 dark:border-gray-700">
                 {TABS.map((t) => {
                     const isActive = tab === t.id;
                     return (
@@ -62,7 +62,9 @@ export function ProjectV1() {
                             aria-selected={isActive}
                             aria-controls={`panel-${t.id}`}
                             className={`-mb-px border-b-2 px-1 pb-2 text-sm cursor-pointer ${
-                                isActive ? "border-black text-black" : "border-transparent text-gray-500 hover:text-black"
+                                isActive
+                                    ? "border-black text-black dark:border-white dark:text-white"
+                                    : "border-transparent text-gray-500 hover:text-black dark:text-gray-400 dark:hover:text-white"
                             }`}
                             onClick={() => setTab(t.id)}
                         >
