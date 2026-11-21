@@ -365,18 +365,24 @@ function ObservationTooltip({ observation, onMouseEnter, onMouseLeave, onOpenPho
     );
 }
 
-// Draws observations, grouping nearby ones into clusters until the map is zoomed in.
-// Must be rendered inside <GoogleMap> so useMap() finds the map.
 // Opacity of the dots and clusters that don't match the filter being previewed.
 const FADED_OPACITY = 0.15;
 
 interface ObservationLayerProps {
     points: CottontailRow[];
+    // Every species in the data, most observed first. Later species are drawn on top, so the
+    // rarer ones aren't buried under the common one.
     species: string[];
     // A filter whose legend entry is hovered: what doesn't match it is faded.
     preview: Filter | null;
 }
 
+// Draws observations, grouping nearby ones into clusters until the map is zoomed in.
+// Must be rendered inside <GoogleMap> so useMap() finds the map.
+//
+// Each marker on a Google Maps Data layer is slow to create (around half a millisecond), so the
+// layer is made once and kept: panning, zooming, filtering and the time range all update it by
+// adding and removing only the markers that changed.
 function ObservationLayer({ points, species, preview }: ObservationLayerProps) {
     const map = useMap();
 
@@ -442,17 +448,22 @@ function ObservationLayer({ points, species, preview }: ObservationLayerProps) {
         [points, species]
     );
 
+    // The layer reads the current data through these, so new data doesn't mean a new layer.
+    const indexesRef = useRef(indexes);
+    const byIdRef = useRef(byId);
+    // Brings the layer up to date with the view; `force` also redoes it when the view hasn't moved.
+    const sync = useRef<((force: boolean) => void) | null>(null);
+
     useEffect(() => {
         if (!map) return;
 
-        // Rarer species are drawn on top so they aren't buried under the common one.
-        const counts = d3.rollup(points, (v) => v.length, (d) => d.species);
+        // Doubled so each dot or cluster's badges can sit one step above it.
+        const zIndexes = new Map(species.map((sp, i) => [sp, 2 * i]));
 
         const layer = new google.maps.Data({ map });
         const style = (feature: google.maps.Data.Feature): google.maps.Data.StyleOptions => {
             const sp = feature.getProperty("species") as string;
-            // Doubled so each dot or cluster's badges can sit one step above it.
-            const zIndex = 2 * (points.length - (counts.get(sp) ?? 0));
+            const zIndex = zIndexes.get(sp) ?? 0;
             const count = feature.getProperty("point_count") as number | undefined;
             // Badges carry their dot or cluster's properties, so they fade along with it.
             const opacity = previewRef.current && !featureMatches(feature, previewRef.current) ? FADED_OPACITY : 1;
@@ -505,9 +516,11 @@ function ObservationLayer({ points, species, preview }: ObservationLayerProps) {
 
         // The area and zoom the layer currently has features for.
         let loaded: { zoom: number; bbox: [number, number, number, number] } | null = null;
+        // Feature id -> Supercluster cluster id, for every cluster and its badges. Kept out of the
+        // features' properties because a cluster kept across a data change gets a new cluster id.
+        let clusterIds = new Map<string, number>();
 
-        // Bring the layer up to date with the current view whenever the map stops moving.
-        const update = () => {
+        sync.current = (force) => {
             const bounds = map.getBounds();
             const rawZoom = map.getZoom();
             if (!bounds || rawZoom === undefined) return;
@@ -518,14 +531,15 @@ function ObservationLayer({ points, species, preview }: ObservationLayerProps) {
 
             // Small pans that stay inside the already-loaded area need no update at all.
             if (
-                loaded && loaded.zoom === zoom &&
+                !force && loaded && loaded.zoom === zoom &&
                 sw.lng() >= loaded.bbox[0] && sw.lat() >= loaded.bbox[1] &&
                 ne.lng() <= loaded.bbox[2] && ne.lat() <= loaded.bbox[3]
             ) return;
 
-            // Load half a screen of margin on every side so the next few pans are covered.
-            const dLng = (ne.lng() - sw.lng()) / 2;
-            const dLat = (ne.lat() - sw.lat()) / 2;
+            // Load a quarter screen of margin on every side so short pans are covered. Every
+            // loaded marker costs time to create, so more margin makes each update slower.
+            const dLng = (ne.lng() - sw.lng()) / 4;
+            const dLat = (ne.lat() - sw.lat()) / 4;
             const bbox: [number, number, number, number] = [
                 Math.max(-180, sw.lng() - dLng),
                 Math.max(-90, sw.lat() - dLat),
@@ -533,22 +547,30 @@ function ObservationLayer({ points, species, preview }: ObservationLayerProps) {
                 Math.min(90, ne.lat() + dLat)
             ];
 
-            // Give every cluster and point a stable id. Cluster ids are only unique within one
-            // species' index, so the species is part of the key.
+            // Give every cluster and point an id that stays the same while it looks the same, so
+            // it's kept rather than recreated. Points have their observation id. A cluster is
+            // identified by what's drawn: its species, size, position and badges. (Supercluster's
+            // own cluster ids can be reused for a different cluster once the data changes.)
             const next = new Map<string, GeoJSON.Feature>();
-            for (const [sp, index] of indexes) {
+            const nextClusterIds = new Map<string, number>();
+            for (const [sp, index] of indexesRef.current) {
                 for (const f of index.getClusters(bbox, zoom)) {
-                    const key = "cluster_id" in f.properties
-                        ? `${sp}:cluster:${f.properties.cluster_id}`
-                        : `${sp}:point:${f.properties.occurrenceID}`;
-                    const properties = { ...f.properties, species: sp };
+                    const p = f.properties;
+                    let key: string;
+                    if ("cluster_id" in p) {
+                        const [lng, lat] = f.geometry.coordinates;
+                        key = `${sp}:cluster:${p.point_count}:${lng},${lat}:${p.hasPhoto ? "p" : ""}${p.hasJuvenile ? "j" : ""}`;
+                    } else {
+                        key = `${sp}:point:${p.occurrenceID}`;
+                    }
+                    const properties = { ...p, species: sp };
                     next.set(key, { type: "Feature", id: key, geometry: f.geometry, properties });
 
                     // Each badge is its own feature at the same spot. It carries the same
                     // properties, so hovering or clicking it acts on its dot or cluster.
                     const badges: BadgeKind[] = [];
-                    if (f.properties.hasPhoto) badges.push("photo");
-                    if (f.properties.hasJuvenile) badges.push("juvenile");
+                    if (p.hasPhoto) badges.push("photo");
+                    if (p.hasJuvenile) badges.push("juvenile");
                     for (const badge of badges) {
                         next.set(`${key}:${badge}`, {
                             type: "Feature",
@@ -556,6 +578,10 @@ function ObservationLayer({ points, species, preview }: ObservationLayerProps) {
                             geometry: f.geometry,
                             properties: { ...properties, badge }
                         });
+                    }
+
+                    if ("cluster_id" in p) {
+                        for (const id of [key, ...badges.map((b) => `${key}:${b}`)]) nextClusterIds.set(id, p.cluster_id);
                     }
                 }
             }
@@ -573,15 +599,16 @@ function ObservationLayer({ points, species, preview }: ObservationLayerProps) {
             if (added.length) layer.addGeoJson({ type: "FeatureCollection", features: added });
 
             loaded = { zoom, bbox };
+            clusterIds = nextClusterIds;
         };
 
-        const idleListener = map.addListener("idle", update);
-        update();
+        const idleListener = map.addListener("idle", () => sync.current?.(false));
+        sync.current(true);
 
         // Clicking a cluster zooms in just far enough to split it apart.
         const clickListener = layer.addListener("click", (e: google.maps.Data.MouseEvent) => {
-            const clusterId = e.feature.getProperty("cluster_id") as number | undefined;
-            const index = indexes.get(e.feature.getProperty("species") as string);
+            const clusterId = clusterIds.get(e.feature.getId() as string);
+            const index = indexesRef.current.get(e.feature.getProperty("species") as string);
             if (clusterId === undefined || !index || !e.latLng) return;
 
             map.setZoom(index.getClusterExpansionZoom(clusterId));
@@ -590,8 +617,8 @@ function ObservationLayer({ points, species, preview }: ObservationLayerProps) {
 
         // Hovering a single observation (not a cluster) shows its tooltip.
         const overListener = layer.addListener("mouseover", (e: google.maps.Data.MouseEvent) => {
-            if (e.feature.getProperty("cluster_id") !== undefined) return;
-            const observation = byId.get(e.feature.getProperty("occurrenceID") as number);
+            if (clusterIds.has(e.feature.getId() as string)) return;
+            const observation = byIdRef.current.get(e.feature.getProperty("occurrenceID") as number);
             const geometry = e.feature.getGeometry();
             if (!observation || !(geometry instanceof google.maps.Data.Point)) return;
             cancelHide();
@@ -609,9 +636,20 @@ function ObservationLayer({ points, species, preview }: ObservationLayerProps) {
             zoomListener.remove();
             layer.setMap(null);
             restyle.current = null;
+            sync.current = null;
             hideNow();
         };
-    }, [map, points, species, indexes, byId, cancelHide, scheduleHide, hideNow]);
+    }, [map, species, cancelHide, scheduleHide, hideNow]);
+
+    // New data (from filters or the time range) updates the existing layer in place.
+    useEffect(() => {
+        if (indexesRef.current === indexes) return;
+        indexesRef.current = indexes;
+        byIdRef.current = byId;
+        // The hovered observation may have just been filtered out.
+        hideNow();
+        sync.current?.(true);
+    }, [indexes, byId, hideNow]);
 
     useEffect(() => {
         previewRef.current = preview;
@@ -801,6 +839,12 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
         () => Array.from(new Set((data ?? []).filter(isMappable).map((d) => d.species))).sort(d3.ascending),
         [data]
     );
+    // Most observed first, the order the points layer draws them in. Also from all observations,
+    // so filtering doesn't reorder them (which would restyle every marker).
+    const drawOrder = useMemo(() => {
+        const counts = d3.rollup((data ?? []).filter(isMappable), (v) => v.length, (d) => d.species);
+        return [...species].sort((a, b) => (counts.get(b) ?? 0) - (counts.get(a) ?? 0));
+    }, [data, species]);
     // In the order they were added, so new chips go on the end.
     const [filters, setFilters] = useState<Filter[]>([]);
     const isActive = (f: Filter) => filters.some((g) => filterKey(g) === filterKey(f));
@@ -912,7 +956,7 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
                     >
                         <RegionMask />
                         {mode === "points"
-                            ? <ObservationLayer points={visiblePoints} species={species} preview={preview} />
+                            ? <ObservationLayer points={visiblePoints} species={drawOrder} preview={preview} />
                             : <DensityHeatmap points={heatmapPoints} species={heatmapSpecies} />}
                     </GoogleMap>
                 </APIProvider>
