@@ -232,7 +232,8 @@ function ObservationTooltip({ observation, onMouseEnter, onMouseLeave }: Observa
     const lifeStage = observation.lifeStage === null ? null : LIFE_STAGES[observation.lifeStage];
     const details = [
         lifeStage,
-        observation.isAlive === false ? "deceased" : null,
+        // Unrecorded (null) gets no marker either way.
+        observation.isAlive === true ? "alive" : observation.isAlive === false ? "deceased" : null,
         `observed ${observation.month}/${observation.day}/${observation.year}`
     ].filter(Boolean).join(" · ");
 
