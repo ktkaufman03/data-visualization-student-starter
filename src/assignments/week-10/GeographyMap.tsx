@@ -655,6 +655,94 @@ function MapSettings({ mode, onModeChange, timeSlider }: MapSettingsProps) {
 // has no color, so skip both.
 const isMappable = (d: CottontailRow) => d.decimalLatitude && d.decimalLongitude && d.species !== "Unknown";
 
+// Characteristics an observation can be filtered on, matching the map's badges.
+type Trait = "photo" | "juvenile";
+const TRAITS: Record<Trait, { label: string; test: (d: CottontailRow) => boolean }> = {
+    photo: { label: "has photo", test: hasLivingPhoto },
+    juvenile: { label: "juvenile", test: (d) => d.lifeStage === JUVENILE }
+};
+
+type Filter = { kind: "species"; species: string } | { kind: "trait"; trait: Trait };
+
+const filterKey = (f: Filter) => (f.kind === "species" ? `species:${f.species}` : `trait:${f.trait}`);
+
+// Species filters widen each other (any of the chosen species), while traits narrow
+// (every chosen trait), so "floridanus + transitionalis + juvenile" means juveniles of either.
+function matchesFilters(d: CottontailRow, filters: Filter[]) {
+    const species = filters.filter((f) => f.kind === "species");
+    if (species.length > 0 && !species.some((f) => f.species === d.species)) return false;
+    return filters.every((f) => f.kind !== "trait" || TRAITS[f.trait].test(d));
+}
+
+// Legend entries double as filter toggles; a pressed one is highlighted.
+function LegendToggle({ pressed, onClick, children }: { pressed: boolean; onClick: () => void; children: ReactNode }) {
+    return (
+        <button
+            type="button"
+            aria-pressed={pressed}
+            title={pressed ? "Remove this filter" : "Filter to this"}
+            className={`-mx-1.5 flex cursor-pointer items-center gap-1 rounded-full px-1.5 py-0.5 ${
+                pressed
+                    ? "bg-gray-200 ring-1 ring-gray-400 dark:bg-gray-700 dark:ring-gray-500"
+                    : "hover:bg-gray-100 dark:hover:bg-gray-800"
+            }`}
+            onClick={onClick}
+        >
+            {children}
+        </button>
+    );
+}
+
+// The applied filters, each removable on its own.
+function FilterChips({ filters, onRemove, onClear }: { filters: Filter[]; onRemove: (f: Filter) => void; onClear: () => void }) {
+    return (
+        <div className="flex min-h-7 flex-wrap items-center gap-2 text-sm">
+            <span className="text-gray-600 dark:text-gray-400">Filters:</span>
+            {filters.length === 0 && (
+                <span className="text-gray-500">none · click a legend entry to add one</span>
+            )}
+            {filters.map((f) => {
+                const label = f.kind === "species" ? f.species : TRAITS[f.trait].label;
+                return (
+                    <span
+                        key={filterKey(f)}
+                        className="inline-flex items-center gap-1 rounded-full border border-gray-300 bg-gray-100 py-0.5 pl-2.5 pr-1 dark:border-gray-600 dark:bg-gray-800"
+                    >
+                        {f.kind === "species" ? (
+                            <>
+                                <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: speciesColor(f.species) }} />
+                                <i>{label}</i>
+                            </>
+                        ) : (
+                            <>
+                                <img src={BADGE_URLS[f.trait]} alt="" className="h-[13px] w-[13px]" />
+                                {label}
+                            </>
+                        )}
+                        <button
+                            type="button"
+                            aria-label={`Remove filter: ${label}`}
+                            className="flex h-5 w-5 cursor-pointer items-center justify-center rounded-full text-base leading-none text-gray-500 hover:bg-gray-300 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-600 dark:hover:text-gray-100"
+                            onClick={() => onRemove(f)}
+                        >
+                            ×
+                        </button>
+                    </span>
+                );
+            })}
+            {filters.length > 1 && (
+                <button
+                    type="button"
+                    className="cursor-pointer text-gray-600 underline underline-offset-2 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+                    onClick={onClear}
+                >
+                    Clear all
+                </button>
+            )}
+        </div>
+    );
+}
+
 export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
     const [mode, setMode] = useState<MapMode>("points");
     const { theme } = useTheme();
@@ -666,35 +754,53 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
         () => Array.from(new Set((data ?? []).filter(isMappable).map((d) => d.species))).sort(d3.ascending),
         [data]
     );
-    const visiblePoints = useMemo(() => (filtered ?? []).filter(isMappable), [filtered]);
+    // In the order they were added, so new chips go on the end.
+    const [filters, setFilters] = useState<Filter[]>([]);
+    const isActive = (f: Filter) => filters.some((g) => filterKey(g) === filterKey(f));
+    const removeFilter = (f: Filter) => setFilters((fs) => fs.filter((g) => filterKey(g) !== filterKey(f)));
+    const toggleFilter = (f: Filter) => (isActive(f) ? removeFilter(f) : setFilters((fs) => [...fs, f]));
+
+    const visiblePoints = useMemo(
+        () => (filtered ?? []).filter((d) => isMappable(d) && matchesFilters(d, filters)),
+        [filtered, filters]
+    );
 
     // The heatmap mixes species colors by share, so observations not identified to a species
     // are left out of it rather than diluting the mix.
     const heatmapSpecies = useMemo(() => species.filter((sp) => !isGenusOnly(sp)), [species]);
     const heatmapPoints = useMemo(() => visiblePoints.filter((d) => !isGenusOnly(d.species)), [visiblePoints]);
+    const shownCount = mode === "points" ? visiblePoints.length : heatmapPoints.length;
+    // Only once the data has loaded, and only when filters are on, since that's what the warning offers to undo.
+    const filteredToNothing = data !== null && filters.length > 0 && shownCount === 0;
 
     return (
         <div className="flex flex-col w-full h-full gap-2">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
                 <span>
-                    Observations: {d3.format(",")(mode === "points" ? visiblePoints.length : heatmapPoints.length)}
+                    Observations: {d3.format(",")(shownCount)}
                 </span>
                 {mode === "points" ? (
                     <>
-                        {species.map((sp) => (
-                            <span key={sp} className="flex items-center gap-1">
-                                <span className="inline-block w-3 h-3 rounded-full" style={{ background: speciesColor(sp) }} />
-                                <i>{sp}</i>
-                            </span>
-                        ))}
-                        <span className="flex items-center gap-1 text-gray-600 dark:text-gray-400">
-                            <img src={BADGE_URLS.photo} alt="" className="h-[13px] w-[13px]" />
-                            has a photo (hover a single dot to see it)
-                        </span>
-                        <span className="flex items-center gap-1 text-gray-600 dark:text-gray-400">
-                            <img src={BADGE_URLS.juvenile} alt="" className="h-[13px] w-[13px]" />
-                            juvenile
-                        </span>
+                        {species.map((sp) => {
+                            const f: Filter = { kind: "species", species: sp };
+                            return (
+                                <LegendToggle key={sp} pressed={isActive(f)} onClick={() => toggleFilter(f)}>
+                                    <span className="inline-block w-3 h-3 rounded-full" style={{ background: speciesColor(sp) }} />
+                                    <i>{sp}</i>
+                                </LegendToggle>
+                            );
+                        })}
+                        {(Object.keys(TRAITS) as Trait[]).map((trait) => {
+                            const f: Filter = { kind: "trait", trait };
+                            return (
+                                <LegendToggle key={trait} pressed={isActive(f)} onClick={() => toggleFilter(f)}>
+                                    <img src={BADGE_URLS[trait]} alt="" className="h-[13px] w-[13px]" />
+                                    <span className="text-gray-600 dark:text-gray-400">
+                                        {trait === "photo" ? "has a photo (hover a single dot to see it)" : TRAITS[trait].label}
+                                    </span>
+                                </LegendToggle>
+                            );
+                        })}
                     </>
                 ) : heatmapSpecies.length > 0 && (
                     <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -706,9 +812,41 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
                 )}
             </div>
 
+            <FilterChips filters={filters} onRemove={removeFilter} onClear={() => setFilters([])} />
+
             <MapSettings mode={mode} onModeChange={setMode} timeSlider={timeSlider} />
 
-            <div className="flex-1 min-h-0 overflow-hidden rounded">
+            <div className="relative flex-1 min-h-0 overflow-hidden rounded">
+                {filteredToNothing && (
+                    // Floats over the top of the map; the map underneath stays usable.
+                    <div className="pointer-events-none absolute inset-x-0 top-4 z-10 flex justify-center px-4">
+                        <div
+                            role="status"
+                            className="pointer-events-auto flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900 shadow-lg dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+                        >
+                            <span>
+                                <span aria-hidden="true">⚠ </span>
+                                No observations match {filters.length === 1 ? "this filter" : "this combination of filters"} in
+                                the selected time range.
+                                {mode === "heatmap" && " The heatmap leaves out observations identified only to genus."}
+                            </span>
+                            <button
+                                type="button"
+                                className="cursor-pointer font-medium underline underline-offset-2 hover:text-amber-950 dark:hover:text-white"
+                                onClick={() => setFilters((fs) => fs.slice(0, -1))}
+                            >
+                                Undo last filter
+                            </button>
+                            <button
+                                type="button"
+                                className="cursor-pointer font-medium underline underline-offset-2 hover:text-amber-950 dark:hover:text-white"
+                                onClick={() => setFilters([])}
+                            >
+                                Clear all
+                            </button>
+                        </div>
+                    </div>
+                )}
                 <APIProvider apiKey={MAPS_API_KEY}>
                     <GoogleMap
                         // Google only reads the color scheme when the map is created, so a new
