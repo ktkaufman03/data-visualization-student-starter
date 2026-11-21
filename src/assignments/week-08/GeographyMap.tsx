@@ -13,7 +13,7 @@ import { TimeRangeSlider, type TimeRangeSliderProps } from './TimeRangeSlider';
 import { useTimeFilter } from './useTimeFilter';
 import { useTheme } from '../../helpers/theme';
 
-const MAPS_API_KEY: string = 'AIzaSyAnRfJkpiJJus9f5jcooGtzVFsl7-rd-RI';
+const MAPS_API_KEY: string = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
 // Roughly the six New England states, from southwest Connecticut to northern Maine.
 // The map fits these bounds to whatever size its container is.

@@ -13,7 +13,7 @@ import { useTimeFilter } from './useTimeFilter';
 import { useTheme } from '../../helpers/theme';
 
 // google maps demo key
-const MAPS_API_KEY: string = 'AIzaSyC23xtNxenZmWJ0yz_uW5A_nZnDi1Mz9NE';
+const MAPS_API_KEY: string = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
 // Roughly the six New England states, from southwest Connecticut to northern Maine.
 // The map fits these bounds to whatever size its container is.
