@@ -81,6 +81,7 @@ SEARCH_PARAMS = {
     "photos": True,
 
     # Avoid licensing issues - filter to specific CC licenses
+    "licensed": True,
     "license": ["cc-by", "cc-by-nc", "cc-by-sa", "cc-by-nc-sa", "cc0"],
     "photo_license": ["cc-by", "cc-by-nc", "cc-by-sa", "cc-by-nc-sa", "cc0"],
 }
@@ -122,8 +123,9 @@ def simplify_record(record: dict) -> dict:
         "day": record["observed_on_details"]["day"],
         "month": record["observed_on_details"]["month"],
         "year": record["observed_on_details"]["year"],
-        "mainPhotoID": main_photo["id"],
-        "license": main_photo["license_code"],
+        "licenseCode": record["license_code"],
+        "photoID": main_photo["id"],
+        "photoLicenseCode": main_photo["license_code"],
         "author": record["user"]["name"] or record["user"]["login"]
     }
 
@@ -181,7 +183,7 @@ def query_inat():
 
     return results
 
-DEBUG_LOCAL_LOAD = True
+DEBUG_LOCAL_LOAD = False
 
 def main():
     if DEBUG_LOCAL_LOAD:

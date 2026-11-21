@@ -26,6 +26,7 @@ The script produces two datasets:
 - isAlive (categorical): whether the observed cottontail was alive (true), dead (false), or "unknown" (null; i.e., the fact was not recorded at the time)
 - decimal\[Latitude/Longitude\]: the (approximate) [latitude/longitude] where the observation took place
 - day/month/year (time): _when_ the observation took place
-- mainPhotoID (categorical): the ID of the submission's primary photo
-- license (categorical): the submission's license, used for attribution statements
+- licenseCode (categorical): the submission's license
+- photoID (categorical): the ID of the submission's primary photo
+- photoLicenseCode (categorical): the primary photo's license, used for attribution statements
 - author (categorical): the person to be credited for the submission
