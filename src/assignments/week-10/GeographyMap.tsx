@@ -724,7 +724,7 @@ const isMappable = (d: CottontailRow) => d.decimalLatitude && d.decimalLongitude
 // Characteristics an observation can be filtered on, matching the map's badges.
 type Trait = "photo" | "juvenile";
 const TRAITS: Record<Trait, { label: string; test: (d: CottontailRow) => boolean }> = {
-    photo: { label: "has photo", test: hasLivingPhoto },
+    photo: { label: "has a photo", test: hasLivingPhoto },
     juvenile: { label: "juvenile", test: (d) => d.lifeStage === JUVENILE }
 };
 
@@ -893,7 +893,7 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
                                 <LegendToggle key={trait} pressed={isActive(f)} onClick={() => toggleFilter(f)} onPreview={previewFilter(f)}>
                                     <img src={BADGE_URLS[trait]} alt="" className="h-[13px] w-[13px]" />
                                     <span className="text-gray-600 dark:text-gray-400">
-                                        {trait === "photo" ? "has a photo (hover a single dot to see it)" : TRAITS[trait].label}
+                                        {TRAITS[trait].label}
                                     </span>
                                 </LegendToggle>
                             );
