@@ -865,10 +865,21 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
     // The heatmap mixes species colors by share, so observations not identified to a species
     // are left out of it rather than diluting the mix.
     const heatmapSpecies = useMemo(() => species.filter((sp) => !isGenusOnly(sp)), [species]);
-    const heatmapPoints = useMemo(() => visiblePoints.filter((d) => !isGenusOnly(d.species)), [visiblePoints]);
+    // Filters are only offered in points mode for now, so the heatmap ignores them. They're kept,
+    // though, and apply again on switching back to points.
+    const heatmapPoints = useMemo(
+        () => (filtered ?? []).filter((d) => isMappable(d) && !isGenusOnly(d.species)),
+        [filtered]
+    );
     const shownCount = mode === "points" ? visiblePoints.length : heatmapPoints.length;
     // Only once the data has loaded, and only when filters are on, since that's what the warning offers to undo.
-    const filteredToNothing = data !== null && filters.length > 0 && shownCount === 0;
+    const filteredToNothing = mode === "points" && data !== null && filters.length > 0 && shownCount === 0;
+
+    const changeMode = (next: MapMode) => {
+        // The hovered legend entry disappears without a mouseleave, so drop its preview here.
+        setPreview(null);
+        setMode(next);
+    };
 
     return (
         <div className="flex flex-col w-full h-full gap-2">
@@ -909,9 +920,11 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
                 )}
             </div>
 
-            <FilterChips filters={filters} onRemove={removeFilter} onClear={() => setFilters([])} />
+            {mode === "points" && (
+                <FilterChips filters={filters} onRemove={removeFilter} onClear={() => setFilters([])} />
+            )}
 
-            <MapSettings mode={mode} onModeChange={setMode} timeSlider={timeSlider} />
+            <MapSettings mode={mode} onModeChange={changeMode} timeSlider={timeSlider} />
 
             <div className="relative flex-1 min-h-0 overflow-hidden rounded">
                 {filteredToNothing && (
@@ -925,7 +938,6 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
                                 <span aria-hidden="true">⚠ </span>
                                 No observations match {filters.length === 1 ? "this filter" : "this combination of filters"} in
                                 the selected time range.
-                                {mode === "heatmap" && " The heatmap leaves out observations identified only to genus."}
                             </span>
                             <button
                                 type="button"
