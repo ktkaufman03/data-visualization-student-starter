@@ -367,8 +367,23 @@ function ObservationTooltip({ observation, onMouseEnter, onMouseLeave, onOpenPho
 
 // Draws observations, grouping nearby ones into clusters until the map is zoomed in.
 // Must be rendered inside <GoogleMap> so useMap() finds the map.
-function ObservationLayer({ points, species }: { points: CottontailRow[]; species: string[] }) {
+// Opacity of the dots and clusters that don't match the filter being previewed.
+const FADED_OPACITY = 0.15;
+
+interface ObservationLayerProps {
+    points: CottontailRow[];
+    species: string[];
+    // A filter whose legend entry is hovered: what doesn't match it is faded.
+    preview: Filter | null;
+}
+
+function ObservationLayer({ points, species, preview }: ObservationLayerProps) {
     const map = useMap();
+
+    // Read by the layer's style function, so changing the preview only restyles the
+    // features instead of rebuilding the layer.
+    const previewRef = useRef(preview);
+    const restyle = useRef<(() => void) | null>(null);
     // The single observation under the mouse (or whose tooltip is), and where its dot is.
     const [hovered, setHovered] = useState<{ observation: CottontailRow; position: google.maps.LatLng } | null>(null);
 
@@ -434,16 +449,18 @@ function ObservationLayer({ points, species }: { points: CottontailRow[]; specie
         const counts = d3.rollup(points, (v) => v.length, (d) => d.species);
 
         const layer = new google.maps.Data({ map });
-        layer.setStyle((feature) => {
+        const style = (feature: google.maps.Data.Feature): google.maps.Data.StyleOptions => {
             const sp = feature.getProperty("species") as string;
             // Doubled so each dot or cluster's badges can sit one step above it.
             const zIndex = 2 * (points.length - (counts.get(sp) ?? 0));
             const count = feature.getProperty("point_count") as number | undefined;
+            // Badges carry their dot or cluster's properties, so they fade along with it.
+            const opacity = previewRef.current && !featureMatches(feature, previewRef.current) ? FADED_OPACITY : 1;
 
             const badge = feature.getProperty("badge") as BadgeKind | undefined;
             if (badge) {
                 const radius = count ? clusterRadius(count) : POINT_RADIUS;
-                return { icon: badgeIcon(badge, radius), cursor: count ? "pointer" : undefined, zIndex: zIndex + 1 };
+                return { icon: badgeIcon(badge, radius), cursor: count ? "pointer" : undefined, zIndex: zIndex + 1, opacity };
             }
 
             if (count) {
@@ -464,6 +481,7 @@ function ObservationLayer({ points, species }: { points: CottontailRow[]; specie
                     },
                     cursor: "pointer",
                     zIndex,
+                    opacity,
                     title: `${d3.format(",")(count)} ${sp} observations (click to zoom in)`
                 };
             }
@@ -477,9 +495,13 @@ function ObservationLayer({ points, species }: { points: CottontailRow[]; specie
                     strokeColor: "#ffffff",
                     strokeWeight: 1
                 },
-                zIndex
+                zIndex,
+                opacity
             };
-        });
+        };
+        layer.setStyle(style);
+        // A new function each time, so the layer re-runs it on every feature.
+        restyle.current = () => layer.setStyle((feature) => style(feature));
 
         // The area and zoom the layer currently has features for.
         let loaded: { zoom: number; bbox: [number, number, number, number] } | null = null;
@@ -586,9 +608,15 @@ function ObservationLayer({ points, species }: { points: CottontailRow[]; specie
             outListener.remove();
             zoomListener.remove();
             layer.setMap(null);
+            restyle.current = null;
             hideNow();
         };
     }, [map, points, species, indexes, byId, cancelHide, scheduleHide, hideNow]);
+
+    useEffect(() => {
+        previewRef.current = preview;
+        restyle.current?.();
+    }, [preview]);
 
     return (
         <>
@@ -674,13 +702,32 @@ function matchesFilters(d: CottontailRow, filters: Filter[]) {
     return filters.every((f) => f.kind !== "trait" || TRAITS[f.trait].test(d));
 }
 
+// Whether a dot, cluster or badge on the map matches a filter. A cluster matches a trait if any
+// observation in it has the trait, the same rule that gives it the trait's badge.
+function featureMatches(feature: google.maps.Data.Feature, filter: Filter) {
+    if (filter.kind === "species") return feature.getProperty("species") === filter.species;
+    return Boolean(feature.getProperty(filter.trait === "photo" ? "hasPhoto" : "hasJuvenile"));
+}
+
+interface LegendToggleProps {
+    pressed: boolean;
+    onClick: () => void;
+    // Hovering (or focusing) an entry previews its filter on the map.
+    onPreview: (previewing: boolean) => void;
+    children: ReactNode;
+}
+
 // Legend entries double as filter toggles; a pressed one is highlighted.
-function LegendToggle({ pressed, onClick, children }: { pressed: boolean; onClick: () => void; children: ReactNode }) {
+function LegendToggle({ pressed, onClick, onPreview, children }: LegendToggleProps) {
     return (
         <button
             type="button"
             aria-pressed={pressed}
             title={pressed ? "Remove this filter" : "Filter to this"}
+            onMouseEnter={() => onPreview(true)}
+            onMouseLeave={() => onPreview(false)}
+            onFocus={() => onPreview(true)}
+            onBlur={() => onPreview(false)}
             className={`-mx-1.5 flex cursor-pointer items-center gap-1 rounded-full px-1.5 py-0.5 ${
                 pressed
                     ? "bg-gray-200 ring-1 ring-gray-400 dark:bg-gray-700 dark:ring-gray-500"
@@ -760,6 +807,12 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
     const removeFilter = (f: Filter) => setFilters((fs) => fs.filter((g) => filterKey(g) !== filterKey(f)));
     const toggleFilter = (f: Filter) => (isActive(f) ? removeFilter(f) : setFilters((fs) => [...fs, f]));
 
+    // The filter whose legend entry is hovered or focused.
+    const [preview, setPreview] = useState<Filter | null>(null);
+    // Leaving only clears the preview if it's still this entry's, in case another entry was entered first.
+    const previewFilter = (f: Filter) => (previewing: boolean) =>
+        setPreview((p) => (previewing ? f : p && filterKey(p) === filterKey(f) ? null : p));
+
     const visiblePoints = useMemo(
         () => (filtered ?? []).filter((d) => isMappable(d) && matchesFilters(d, filters)),
         [filtered, filters]
@@ -784,7 +837,7 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
                         {species.map((sp) => {
                             const f: Filter = { kind: "species", species: sp };
                             return (
-                                <LegendToggle key={sp} pressed={isActive(f)} onClick={() => toggleFilter(f)}>
+                                <LegendToggle key={sp} pressed={isActive(f)} onClick={() => toggleFilter(f)} onPreview={previewFilter(f)}>
                                     <span className="inline-block w-3 h-3 rounded-full" style={{ background: speciesColor(sp) }} />
                                     <i>{sp}</i>
                                 </LegendToggle>
@@ -793,7 +846,7 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
                         {(Object.keys(TRAITS) as Trait[]).map((trait) => {
                             const f: Filter = { kind: "trait", trait };
                             return (
-                                <LegendToggle key={trait} pressed={isActive(f)} onClick={() => toggleFilter(f)}>
+                                <LegendToggle key={trait} pressed={isActive(f)} onClick={() => toggleFilter(f)} onPreview={previewFilter(f)}>
                                     <img src={BADGE_URLS[trait]} alt="" className="h-[13px] w-[13px]" />
                                     <span className="text-gray-600 dark:text-gray-400">
                                         {trait === "photo" ? "has a photo (hover a single dot to see it)" : TRAITS[trait].label}
@@ -859,7 +912,7 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
                     >
                         <RegionMask />
                         {mode === "points"
-                            ? <ObservationLayer points={visiblePoints} species={species} />
+                            ? <ObservationLayer points={visiblePoints} species={species} preview={preview} />
                             : <DensityHeatmap points={heatmapPoints} species={heatmapSpecies} />}
                     </GoogleMap>
                 </APIProvider>
