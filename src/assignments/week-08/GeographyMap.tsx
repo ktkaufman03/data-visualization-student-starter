@@ -1,4 +1,5 @@
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import * as d3 from 'd3';
 import { APIProvider, ColorScheme, Map as GoogleMap, useMap } from '@vis.gl/react-google-maps';
 import Supercluster from 'supercluster';
@@ -6,7 +7,7 @@ import { merge } from 'topojson-client';
 import type { GeometryCollection, Topology } from 'topojson-specification';
 import statesTopology from 'us-atlas/states-10m.json';
 import type { CottontailRow } from './types';
-import { speciesColor } from './species';
+import { isGenusOnly, speciesColor } from './species';
 import { DensityHeatmap } from './DensityHeatmap';
 import { TimeRangeSlider, type TimeRangeSliderProps } from './TimeRangeSlider';
 import { useTimeFilter } from './useTimeFilter';
@@ -25,14 +26,16 @@ const NEW_ENGLAND_BOUNDS = {
     padding: 16
 };
 
-// State FIPS codes: Connecticut, Maine, Massachusetts, New Hampshire, Rhode Island, Vermont.
-const NEW_ENGLAND_FIPS = new Set(["09", "23", "25", "33", "44", "50"]);
+// The states left un-grayed on the map: the six New England states, plus New York since the
+// dataset has a few observations there. State FIPS codes: Connecticut, Maine, Massachusetts,
+// New Hampshire, New York, Rhode Island, Vermont.
+const REGION_FIPS = new Set(["09", "23", "25", "33", "36", "44", "50"]);
 
-// One outline per landmass (mainland plus islands like Nantucket), with the borders between
-// the six states merged away. Computed once when the module loads.
-const NEW_ENGLAND_OUTLINES: google.maps.LatLngLiteral[][] = (() => {
+// One outline per landmass (mainland plus islands like Nantucket and Long Island), with the
+// borders between the states merged away. Computed once when the module loads.
+const REGION_OUTLINES: google.maps.LatLngLiteral[][] = (() => {
     const topology = statesTopology as unknown as Topology<{ states: GeometryCollection }>;
-    const states = topology.objects.states.geometries.filter((g) => NEW_ENGLAND_FIPS.has(String(g.id)));
+    const states = topology.objects.states.geometries.filter((g) => REGION_FIPS.has(String(g.id)));
     return merge(topology, states as Parameters<typeof merge>[1]).coordinates
         .map((polygon) => polygon[0].map(([lng, lat]) => ({ lat, lng })));
 })();
@@ -47,9 +50,9 @@ function signedArea(ring: google.maps.LatLngLiteral[]) {
     return sum / 2;
 }
 
-// Grays out everything outside New England: a world-sized polygon with New England cut out.
+// Grays out everything outside the region: a world-sized polygon with the region cut out.
 // Must be rendered inside <GoogleMap> so useMap() finds the map.
-function NewEnglandMask() {
+function RegionMask() {
     const map = useMap();
 
     useEffect(() => {
@@ -62,7 +65,7 @@ function NewEnglandMask() {
         ];
         // Google Maps only cuts a hole when it winds the opposite way to the outer path.
         const worldClockwise = signedArea(world) < 0;
-        const holes = NEW_ENGLAND_OUTLINES.map((ring) =>
+        const holes = REGION_OUTLINES.map((ring) =>
             (signedArea(ring) < 0) === worldClockwise ? [...ring].reverse() : ring
         );
 
@@ -84,19 +87,79 @@ function NewEnglandMask() {
 }
 
 interface PointProps {
-    occurrenceID: string;
+    occurrenceID: number;
     species: string;
-    stateProvince: string;
-    year: number;
 }
 
 // Past this zoom level every observation is drawn individually.
 const CLUSTER_MAX_ZOOM = 14;
 
+// iNaturalist "Life Stage" annotation values found in the data.
+const LIFE_STAGES: Record<number, string> = { 2: "adult", 8: "juvenile" };
+
+// Places its children on the map at `position`, moving with the map as it pans and zooms.
+// Must be rendered inside <GoogleMap> so useMap() finds the map.
+function MapOverlay({ position, children }: { position: google.maps.LatLng; children: ReactNode }) {
+    const map = useMap();
+    const [container] = useState(() => {
+        const div = document.createElement("div");
+        div.style.position = "absolute";
+        // Never catch the mouse, or hovering the tooltip would end the hover that opened it.
+        div.style.pointerEvents = "none";
+        return div;
+    });
+
+    useEffect(() => {
+        if (!map) return;
+        const overlay = new google.maps.OverlayView();
+        // The float pane sits above the markers and their labels.
+        overlay.onAdd = () => overlay.getPanes()?.floatPane.appendChild(container);
+        overlay.onRemove = () => container.remove();
+        overlay.draw = () => {
+            const p = overlay.getProjection()?.fromLatLngToDivPixel(position);
+            if (!p) return;
+            container.style.left = `${p.x}px`;
+            container.style.top = `${p.y}px`;
+        };
+        overlay.setMap(map);
+        return () => overlay.setMap(null);
+    }, [map, container, position]);
+
+    return createPortal(children, container);
+}
+
+// The card shown next to a single observation while it's hovered.
+function ObservationTooltip({ observation }: { observation: CottontailRow }) {
+    const lifeStage = observation.lifeStage === null ? null : LIFE_STAGES[observation.lifeStage];
+    const details = [
+        lifeStage,
+        observation.isAlive === false ? "deceased" : null,
+        `observed ${observation.month}/${observation.day}/${observation.year}`
+    ].filter(Boolean).join(" · ");
+
+    return (
+        // Sits to the right of the dot, vertically centered on it, with a caret pointing back at it.
+        <div className="absolute left-0 top-0 translate-x-3 -translate-y-1/2">
+            <div className="relative whitespace-nowrap rounded-xl bg-white px-4 py-2 text-gray-900 shadow-lg ring-1 ring-black/5 dark:bg-gray-800 dark:text-gray-100 dark:ring-white/10">
+                <div className="absolute left-0 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rotate-45 bg-white dark:bg-gray-800" />
+                <p className="relative text-lg font-semibold italic leading-tight">{observation.species}</p>
+                <p className="relative text-sm text-gray-600 dark:text-gray-300">{details}</p>
+                <p className="relative text-xs text-gray-500 dark:text-gray-400">
+                    {observation.stateProvince} · by {observation.author}
+                </p>
+            </div>
+        </div>
+    );
+}
+
 // Draws observations, grouping nearby ones into clusters until the map is zoomed in.
 // Must be rendered inside <GoogleMap> so useMap() finds the map.
 function ObservationLayer({ points, species }: { points: CottontailRow[]; species: string[] }) {
     const map = useMap();
+    // The single observation under the mouse, and where its dot is.
+    const [hovered, setHovered] = useState<{ observation: CottontailRow; position: google.maps.LatLng } | null>(null);
+
+    const byId = useMemo(() => new Map(points.map((d) => [d.occurrenceID, d])), [points]);
 
     // One cluster index per species, so a cluster keeps its species' color and the
     // rare species isn't swallowed by clusters of the common one.
@@ -107,12 +170,7 @@ function ObservationLayer({ points, species }: { points: CottontailRow[]; specie
                 points.filter((d) => d.species === sp).map((d) => ({
                     type: "Feature",
                     geometry: { type: "Point", coordinates: [d.decimalLongitude, d.decimalLatitude] },
-                    properties: {
-                        occurrenceID: d.occurrenceID,
-                        species: d.species,
-                        stateProvince: d.stateProvince,
-                        year: d.year
-                    }
+                    properties: { occurrenceID: d.occurrenceID, species: d.species }
                 }))
             )
         ])),
@@ -137,7 +195,7 @@ function ObservationLayer({ points, species }: { points: CottontailRow[]; specie
                         path: google.maps.SymbolPath.CIRCLE,
                         // Grows slowly with count so big clusters don't cover the map.
                         scale: 8 + 2 * Math.log2(count),
-                        fillColor: speciesColor(sp, species),
+                        fillColor: speciesColor(sp),
                         fillOpacity: 0.85,
                         strokeColor: "#ffffff",
                         strokeWeight: 2
@@ -158,14 +216,12 @@ function ObservationLayer({ points, species }: { points: CottontailRow[]; specie
                 icon: {
                     path: google.maps.SymbolPath.CIRCLE,
                     scale: 4,
-                    fillColor: speciesColor(sp, species),
+                    fillColor: speciesColor(sp),
                     fillOpacity: 0.8,
                     strokeColor: "#ffffff",
                     strokeWeight: 1
                 },
-                zIndex,
-                // Native tooltip on hover.
-                title: `${sp}\n${feature.getProperty("stateProvince")}, ${feature.getProperty("year")}`
+                zIndex
             };
         });
 
@@ -244,21 +300,41 @@ function ObservationLayer({ points, species }: { points: CottontailRow[]; specie
             map.panTo(e.latLng);
         });
 
+        // Hovering a single observation (not a cluster) shows its tooltip.
+        const overListener = layer.addListener("mouseover", (e: google.maps.Data.MouseEvent) => {
+            if (e.feature.getProperty("cluster_id") !== undefined) return;
+            const observation = byId.get(e.feature.getProperty("occurrenceID") as number);
+            const geometry = e.feature.getGeometry();
+            if (!observation || !(geometry instanceof google.maps.Data.Point)) return;
+            setHovered({ observation, position: geometry.get() });
+        });
+        const outListener = layer.addListener("mouseout", () => setHovered(null));
+        // Zooming can swap the hovered dot into a cluster without a mouseout, so close the tooltip.
+        const zoomListener = map.addListener("zoom_changed", () => setHovered(null));
+
         return () => {
             idleListener.remove();
             clickListener.remove();
+            overListener.remove();
+            outListener.remove();
+            zoomListener.remove();
             layer.setMap(null);
+            setHovered(null);
         };
-    }, [map, points, species, indexes]);
+    }, [map, points, species, indexes, byId]);
 
-    return null;
+    return hovered && (
+        <MapOverlay position={hovered.position}>
+            <ObservationTooltip observation={hovered.observation} />
+        </MapOverlay>
+    );
 }
 
 type MapMode = "points" | "heatmap";
 
 // Legend swatch for the heatmap: the species colors blended in Lab, as DensityHeatmap mixes them.
 function speciesMixGradient(species: string[]) {
-    const mix = d3.piecewise(d3.interpolateLab, species.map((sp) => speciesColor(sp, species)));
+    const mix = d3.piecewise(d3.interpolateLab, species.map((sp) => speciesColor(sp)));
     return `linear-gradient(to right, ${d3.range(0, 1.01, 0.1).map((t) => mix(t)).join(", ")})`;
 }
 
@@ -311,20 +387,27 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
     );
     const visiblePoints = useMemo(() => (filtered ?? []).filter(isMappable), [filtered]);
 
+    // The heatmap mixes species colors by share, so observations not identified to a species
+    // are left out of it rather than diluting the mix.
+    const heatmapSpecies = useMemo(() => species.filter((sp) => !isGenusOnly(sp)), [species]);
+    const heatmapPoints = useMemo(() => visiblePoints.filter((d) => !isGenusOnly(d.species)), [visiblePoints]);
+
     return (
         <div className="flex flex-col w-full h-full gap-2">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-                <span>Observations: {d3.format(",")(visiblePoints.length)}</span>
+                <span>
+                    Observations: {d3.format(",")(mode === "points" ? visiblePoints.length : heatmapPoints.length)}
+                </span>
                 {mode === "points" ? species.map((sp) => (
                     <span key={sp} className="flex items-center gap-1">
-                        <span className="inline-block w-3 h-3 rounded-full" style={{ background: speciesColor(sp, species) }} />
+                        <span className="inline-block w-3 h-3 rounded-full" style={{ background: speciesColor(sp) }} />
                         <i>{sp}</i>
                     </span>
-                )) : species.length > 0 && (
+                )) : heatmapSpecies.length > 0 && (
                     <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                        <i>{species[0]}</i>
-                        <span className="inline-block h-3 w-32 rounded-sm" style={{ background: speciesMixGradient(species) }} />
-                        <i>{species[species.length - 1]}</i>
+                        <i>{heatmapSpecies[0]}</i>
+                        <span className="inline-block h-3 w-32 rounded-sm" style={{ background: speciesMixGradient(heatmapSpecies) }} />
+                        <i>{heatmapSpecies[heatmapSpecies.length - 1]}</i>
                         <span className="text-gray-600 dark:text-gray-400">· in-between colors are a mix · fainter means fewer observations</span>
                     </span>
                 )}
@@ -343,10 +426,10 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
                         gestureHandling="greedy"
                         style={{ width: "100%", height: "100%" }}
                     >
-                        <NewEnglandMask />
+                        <RegionMask />
                         {mode === "points"
                             ? <ObservationLayer points={visiblePoints} species={species} />
-                            : <DensityHeatmap points={visiblePoints} species={species} />}
+                            : <DensityHeatmap points={heatmapPoints} species={heatmapSpecies} />}
                     </GoogleMap>
                 </APIProvider>
             </div>

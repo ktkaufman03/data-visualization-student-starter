@@ -61,7 +61,7 @@ export function DensityHeatmap({ points, species }: { points: CottontailRow[]; s
         canvas.style.pointerEvents = "none";
 
         // Species colors in Lab, so mixing them gives perceptually even in-between colors.
-        const labs = species.map((sp) => d3.lab(speciesColor(sp, species)));
+        const labs = species.map((sp) => d3.lab(speciesColor(sp)));
         const bySpecies = species.map((sp) => points
             .filter((d) => d.species === sp)
             .map((d) => new google.maps.LatLng(d.decimalLatitude, d.decimalLongitude)));

@@ -1,10 +1,16 @@
 import { useEffect, useState } from 'react';
 import { csvParse } from 'd3-dsv';
 import type { CottontailRow } from './types';
+import { toSpecies } from './species';
 import { SpeciesBarChart } from './SpeciesBarChart';
 import { GeographyMap } from './GeographyMap';
 
-const DATA_URL = `${import.meta.env.BASE_URL}/data/inaturalist-ne-cottontails/0000876-261118162104854.csv`;
+const DATA_URL = `${import.meta.env.BASE_URL}/data/inaturalist-ne-cottontails-v3/inat_all_cottontails_ne.csv`;
+
+// Empty cells in the CSV are nulls in the source data.
+function orNull<T>(value: string | undefined, convert: (value: string) => T): T | null {
+    return value ? convert(value) : null;
+}
 
 const TABS = [
     { id: 'geography', label: 'Geography' },
@@ -26,16 +32,22 @@ export function ProjectV2() {
                 if (cancelled) return;
                 const parsed = csvParse(text);
                 const converted: CottontailRow[] = parsed.map((row) => ({
-                    occurrenceID: row.occurrenceID,
-                    species: row.species || "Unknown",
+                    occurrenceID: +row.occurrenceID,
+                    // Subspecies are merged into their species.
+                    species: row.species ? toSpecies(row.species) : "Unknown",
                     stateProvince: row.stateProvince || "Unknown",
-                    occurrenceStatus: row.occurrenceStatus,
+                    // Written by pandas as "True"/"False".
+                    isAlive: orNull(row.isAlive, (v) => v === "True"),
+                    // Written as "2.0"/"8.0", since pandas stores a column with blanks as floats.
+                    lifeStage: orNull(row.lifeStage, Number),
                     decimalLatitude: +row.decimalLatitude,
                     decimalLongitude: +row.decimalLongitude,
-                    elevation: +row.elevation,
                     day: +row.day,
                     month: +row.month,
-                    year: +row.year
+                    year: +row.year,
+                    mainPhotoID: +row.mainPhotoID,
+                    license: row.license || null,
+                    author: row.author ?? ""
                 }));
                 setData(converted);
             })

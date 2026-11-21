@@ -89,7 +89,7 @@ export function SpeciesBarChart({ data }: { data: CottontailRow[] | null }) {
         };
     }, [data, filtered, categories]);
 
-    const colorFor = (species: string) => speciesColor(species, summary?.species || []);
+    const colorFor = (species: string) => speciesColor(species);
 
     const innerWidth = Math.max(0, dimensions.width - MARGIN.left - MARGIN.right);
     const innerHeight = Math.max(0, dimensions.height - MARGIN.top - MARGIN.bottom);
@@ -131,7 +131,8 @@ export function SpeciesBarChart({ data }: { data: CottontailRow[] | null }) {
     return (
         <div className="flex flex-col w-full h-full gap-2">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-                <span>Rows: {d3.format(",")(summary?.rows || 0)}</span>                {summary?.species.map((sp) => {
+                <span>Rows: {d3.format(",")(summary?.rows || 0)}</span>
+                {summary?.species.map((sp) => {
                     const isHidden = hiddenSpecies.has(sp);
                     return (
                         <button
