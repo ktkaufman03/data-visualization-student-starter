@@ -86,45 +86,73 @@ function RegionMask() {
     return null;
 }
 
-interface PointProps {
+// Flags shown as badges on a dot, or on a cluster if any observation in it has them.
+interface BadgeFlags {
+    hasPhoto: boolean;
+    hasJuvenile: boolean;
+}
+
+interface PointProps extends BadgeFlags {
     occurrenceID: number;
     species: string;
-    hasPhoto: boolean;
 }
 
 // Whether the tooltip can show a photo: only of living cottontails, so nobody is shown a dead
 // bunny, and only licensed photos, since unlicensed ones aren't in the open-data bucket.
 const hasLivingPhoto = (d: CottontailRow) => d.isAlive === true && d.photoLicenseCode !== null;
 
-// SVG for a small dark badge with a white camera, centered at (cx, cy).
-const cameraBadge = (cx: number, cy: number) =>
-    `<circle cx="${cx}" cy="${cy}" r="5.5" fill="#1f2937" stroke="#ffffff" stroke-width="1"/>` +
-    `<rect x="${cx - 3}" y="${cy - 1.5}" width="6" height="4" rx="0.8" fill="#ffffff"/>` +
-    `<rect x="${cx - 1}" y="${cy - 2.6}" width="2" height="1.4" rx="0.3" fill="#ffffff"/>` +
-    `<circle cx="${cx}" cy="${cy + 0.5}" r="1.2" fill="#1f2937"/>`;
+// iNaturalist's "Juvenile" life stage value.
+const JUVENILE = 8;
 
-const svgDataUrl = (width: number, height: number, body: string) =>
-    `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(
-        `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${body}</svg>`
-    )}`;
+// Radius in pixels of a single observation's dot, and of a cluster of `count` observations
+// (grows slowly with count so big clusters don't cover the map).
+const POINT_RADIUS = 4;
+const clusterRadius = (count: number) => 8 + 2 * Math.log2(count);
+
+// Badges are small dark circles with a white glyph, sitting on the upper edge of a dot or cluster:
+// the camera at the upper right, the juvenile "J" at the upper left.
+type BadgeKind = "photo" | "juvenile";
+const BADGE_SIZE = 13;
+const BADGE_GLYPHS: Record<BadgeKind, (c: number) => string> = {
+    photo: (c) =>
+        `<rect x="${c - 3}" y="${c - 1.5}" width="6" height="4" rx="0.8" fill="#ffffff"/>` +
+        `<rect x="${c - 1}" y="${c - 2.6}" width="2" height="1.4" rx="0.3" fill="#ffffff"/>` +
+        `<circle cx="${c}" cy="${c + 0.5}" r="1.2" fill="#1f2937"/>`,
+    juvenile: (c) =>
+        `<text x="${c}" y="${c + 3}" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" ` +
+        `font-size="8.5" font-weight="700" fill="#ffffff">J</text>`
+};
+
+function badgeSvgUrl(kind: BadgeKind) {
+    const c = BADGE_SIZE / 2;
+    const svg =
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${BADGE_SIZE}" height="${BADGE_SIZE}" viewBox="0 0 ${BADGE_SIZE} ${BADGE_SIZE}">` +
+        `<circle cx="${c}" cy="${c}" r="${c - 1}" fill="#1f2937" stroke="#ffffff" stroke-width="1"/>` +
+        BADGE_GLYPHS[kind](c) +
+        `</svg>`;
+    return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
 
 // For the legend.
-const CAMERA_BADGE_URL = svgDataUrl(13, 13, cameraBadge(6.5, 6.5));
+const BADGE_URLS: Record<BadgeKind, string> = { photo: badgeSvgUrl("photo"), juvenile: badgeSvgUrl("juvenile") };
 
-// A point's dot with the camera badge at its upper right, as a map icon. The anchor keeps the
-// dot (not the whole image) on the observation's location. One icon per color, made once.
-const photoDotIcons = new Map<string, google.maps.Icon>();
-function photoDotIcon(color: string) {
-    let icon = photoDotIcons.get(color);
+// A badge as a map icon, placed against a dot or cluster of the given radius. The badge is its
+// own feature at the same location, so the anchor shifts it up and to the side, onto the edge.
+// Icons are cached, since there are only a few kinds and radii.
+const badgeIcons = new Map<string, google.maps.Icon>();
+function badgeIcon(kind: BadgeKind, radius: number) {
+    const key = `${kind}:${radius.toFixed(1)}`;
+    let icon = badgeIcons.get(key);
     if (!icon) {
+        // Center the badge just outside the circle, 45° up from its center.
+        const offset = (radius + BADGE_SIZE / 2 - 1) * Math.SQRT1_2;
+        const dx = kind === "photo" ? offset : -offset;
         icon = {
-            url: svgDataUrl(22, 22,
-                `<circle cx="8" cy="14" r="4.5" fill="${color}" fill-opacity="0.8" stroke="#ffffff" stroke-width="1"/>` +
-                cameraBadge(15.5, 6.5)),
-            size: new google.maps.Size(22, 22),
-            anchor: new google.maps.Point(8, 14)
+            url: BADGE_URLS[kind],
+            size: new google.maps.Size(BADGE_SIZE, BADGE_SIZE),
+            anchor: new google.maps.Point(BADGE_SIZE / 2 - dx, BADGE_SIZE / 2 + offset)
         };
-        photoDotIcons.set(color, icon);
+        badgeIcons.set(key, icon);
     }
     return icon;
 }
@@ -134,6 +162,11 @@ const CLUSTER_MAX_ZOOM = 14;
 
 // iNaturalist "Life Stage" annotation values found in the data.
 const LIFE_STAGES: Record<number, string> = { 2: "adult", 8: "juvenile" };
+
+const observationUrl = (occurrenceID: number) => `https://www.inaturalist.org/observations/${occurrenceID}`;
+
+// Shown before opening an observation that isn't known to be of a living bunny.
+const UPSETTING_WARNING = "This observation may be upsetting, are you sure you want to continue?";
 
 // How long a tooltip stays open after the cursor leaves its dot, so it can be moved onto the tooltip.
 const TOOLTIP_HIDE_DELAY = 200;
@@ -225,7 +258,23 @@ function ObservationTooltip({ observation, onMouseEnter, onMouseLeave }: Observa
                     <p className="text-xl font-semibold italic leading-tight">{observation.species}</p>
                     <p className="mt-1 text-base text-gray-600 dark:text-gray-300">{details}</p>
                     <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
-                        {observation.stateProvince} · by {observation.author}
+                        {observation.stateProvince} · by{" "}
+                        <a
+                            href={observationUrl(observation.occurrenceID)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="View this observation on iNaturalist"
+                            className="underline decoration-gray-400 underline-offset-2 hover:text-gray-900 hover:decoration-current dark:hover:text-gray-100"
+                            onClick={(e) => {
+                                // The observation page may show a dead (or unrecorded-status) bunny,
+                                // so check before opening anything that isn't known to be alive.
+                                if (observation.isAlive !== true && !window.confirm(UPSETTING_WARNING)) {
+                                    e.preventDefault();
+                                }
+                            }}
+                        >
+                            {observation.author}
+                        </a>
                         {showPhoto && observation.photoLicenseCode && ` · ${formatLicense(observation.photoLicenseCode)}`}
                     </p>
                 </div>
@@ -261,11 +310,25 @@ function ObservationLayer({ points, species }: { points: CottontailRow[]; specie
     const indexes = useMemo(
         () => new Map(species.map((sp) => [
             sp,
-            new Supercluster<PointProps>({ radius: 60, maxZoom: CLUSTER_MAX_ZOOM }).load(
+            new Supercluster<PointProps, BadgeFlags>({
+                radius: 60,
+                maxZoom: CLUSTER_MAX_ZOOM,
+                // A cluster gets a badge if any observation in it would.
+                map: (p) => ({ hasPhoto: p.hasPhoto, hasJuvenile: p.hasJuvenile }),
+                reduce: (acc, p) => {
+                    acc.hasPhoto ||= p.hasPhoto;
+                    acc.hasJuvenile ||= p.hasJuvenile;
+                }
+            }).load(
                 points.filter((d) => d.species === sp).map((d) => ({
                     type: "Feature",
                     geometry: { type: "Point", coordinates: [d.decimalLongitude, d.decimalLatitude] },
-                    properties: { occurrenceID: d.occurrenceID, species: d.species, hasPhoto: hasLivingPhoto(d) }
+                    properties: {
+                        occurrenceID: d.occurrenceID,
+                        species: d.species,
+                        hasPhoto: hasLivingPhoto(d),
+                        hasJuvenile: d.lifeStage === JUVENILE
+                    }
                 }))
             )
         ])),
@@ -281,15 +344,21 @@ function ObservationLayer({ points, species }: { points: CottontailRow[]; specie
         const layer = new google.maps.Data({ map });
         layer.setStyle((feature) => {
             const sp = feature.getProperty("species") as string;
-            const zIndex = points.length - (counts.get(sp) ?? 0);
+            // Doubled so each dot or cluster's badges can sit one step above it.
+            const zIndex = 2 * (points.length - (counts.get(sp) ?? 0));
             const count = feature.getProperty("point_count") as number | undefined;
+
+            const badge = feature.getProperty("badge") as BadgeKind | undefined;
+            if (badge) {
+                const radius = count ? clusterRadius(count) : POINT_RADIUS;
+                return { icon: badgeIcon(badge, radius), cursor: count ? "pointer" : undefined, zIndex: zIndex + 1 };
+            }
 
             if (count) {
                 return {
                     icon: {
                         path: google.maps.SymbolPath.CIRCLE,
-                        // Grows slowly with count so big clusters don't cover the map.
-                        scale: 8 + 2 * Math.log2(count),
+                        scale: clusterRadius(count),
                         fillColor: speciesColor(sp),
                         fillOpacity: 0.85,
                         strokeColor: "#ffffff",
@@ -307,15 +376,10 @@ function ObservationLayer({ points, species }: { points: CottontailRow[]; specie
                 };
             }
 
-            // Observations with a photo of a living bunny get a camera badge on their dot.
-            if (feature.getProperty("hasPhoto")) {
-                return { icon: photoDotIcon(speciesColor(sp)), zIndex };
-            }
-
             return {
                 icon: {
                     path: google.maps.SymbolPath.CIRCLE,
-                    scale: 4,
+                    scale: POINT_RADIUS,
                     fillColor: speciesColor(sp),
                     fillOpacity: 0.8,
                     strokeColor: "#ffffff",
@@ -363,12 +427,22 @@ function ObservationLayer({ points, species }: { points: CottontailRow[]; specie
                     const key = "cluster_id" in f.properties
                         ? `${sp}:cluster:${f.properties.cluster_id}`
                         : `${sp}:point:${f.properties.occurrenceID}`;
-                    next.set(key, {
-                        type: "Feature",
-                        id: key,
-                        geometry: f.geometry,
-                        properties: { ...f.properties, species: sp }
-                    });
+                    const properties = { ...f.properties, species: sp };
+                    next.set(key, { type: "Feature", id: key, geometry: f.geometry, properties });
+
+                    // Each badge is its own feature at the same spot. It carries the same
+                    // properties, so hovering or clicking it acts on its dot or cluster.
+                    const badges: BadgeKind[] = [];
+                    if (f.properties.hasPhoto) badges.push("photo");
+                    if (f.properties.hasJuvenile) badges.push("juvenile");
+                    for (const badge of badges) {
+                        next.set(`${key}:${badge}`, {
+                            type: "Feature",
+                            id: `${key}:${badge}`,
+                            geometry: f.geometry,
+                            properties: { ...properties, badge }
+                        });
+                    }
                 }
             }
 
@@ -514,8 +588,12 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
                             </span>
                         ))}
                         <span className="flex items-center gap-1 text-gray-600 dark:text-gray-400">
-                            <img src={CAMERA_BADGE_URL} alt="" className="h-[13px] w-[13px]" />
-                            has a photo (hover to see it)
+                            <img src={BADGE_URLS.photo} alt="" className="h-[13px] w-[13px]" />
+                            has a photo (hover a single dot to see it)
+                        </span>
+                        <span className="flex items-center gap-1 text-gray-600 dark:text-gray-400">
+                            <img src={BADGE_URLS.juvenile} alt="" className="h-[13px] w-[13px]" />
+                            juvenile
                         </span>
                     </>
                 ) : heatmapSpecies.length > 0 && (
