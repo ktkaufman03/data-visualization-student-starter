@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import * as d3 from 'd3';
 import { APIProvider, ColorScheme, Map as GoogleMap, useMap } from '@vis.gl/react-google-maps';
@@ -89,6 +89,44 @@ function RegionMask() {
 interface PointProps {
     occurrenceID: number;
     species: string;
+    hasPhoto: boolean;
+}
+
+// Whether the tooltip can show a photo: only of living cottontails, so nobody is shown a dead
+// bunny, and only licensed photos, since unlicensed ones aren't in the open-data bucket.
+const hasLivingPhoto = (d: CottontailRow) => d.isAlive === true && d.photoLicenseCode !== null;
+
+// SVG for a small dark badge with a white camera, centered at (cx, cy).
+const cameraBadge = (cx: number, cy: number) =>
+    `<circle cx="${cx}" cy="${cy}" r="5.5" fill="#1f2937" stroke="#ffffff" stroke-width="1"/>` +
+    `<rect x="${cx - 3}" y="${cy - 1.5}" width="6" height="4" rx="0.8" fill="#ffffff"/>` +
+    `<rect x="${cx - 1}" y="${cy - 2.6}" width="2" height="1.4" rx="0.3" fill="#ffffff"/>` +
+    `<circle cx="${cx}" cy="${cy + 0.5}" r="1.2" fill="#1f2937"/>`;
+
+const svgDataUrl = (width: number, height: number, body: string) =>
+    `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${body}</svg>`
+    )}`;
+
+// For the legend.
+const CAMERA_BADGE_URL = svgDataUrl(13, 13, cameraBadge(6.5, 6.5));
+
+// A point's dot with the camera badge at its upper right, as a map icon. The anchor keeps the
+// dot (not the whole image) on the observation's location. One icon per color, made once.
+const photoDotIcons = new Map<string, google.maps.Icon>();
+function photoDotIcon(color: string) {
+    let icon = photoDotIcons.get(color);
+    if (!icon) {
+        icon = {
+            url: svgDataUrl(22, 22,
+                `<circle cx="8" cy="14" r="4.5" fill="${color}" fill-opacity="0.8" stroke="#ffffff" stroke-width="1"/>` +
+                cameraBadge(15.5, 6.5)),
+            size: new google.maps.Size(22, 22),
+            anchor: new google.maps.Point(8, 14)
+        };
+        photoDotIcons.set(color, icon);
+    }
+    return icon;
 }
 
 // Past this zoom level every observation is drawn individually.
@@ -97,6 +135,22 @@ const CLUSTER_MAX_ZOOM = 14;
 // iNaturalist "Life Stage" annotation values found in the data.
 const LIFE_STAGES: Record<number, string> = { 2: "adult", 8: "juvenile" };
 
+// How long a tooltip stays open after the cursor leaves its dot, so it can be moved onto the tooltip.
+const TOOLTIP_HIDE_DELAY = 200;
+
+// iNaturalist keeps each photo's original file extension, so try the common ones in turn.
+// Only openly licensed photos are in this bucket.
+const PHOTO_EXTENSIONS = ["jpg", "jpeg", "JPG", "png"];
+// "medium" is up to 500px on its long side, enough to stay sharp in the tooltip's 128px frame
+// on high-density screens ("square" is only 75x75 and blurs when scaled up).
+const photoUrl = (photoID: number, extension: string) =>
+    `https://inaturalist-open-data.s3.amazonaws.com/photos/${photoID}/medium.${extension}`;
+
+// "cc-by-nc" -> "CC BY-NC", "cc0" -> "CC0", as licenses are usually written in credits.
+function formatLicense(code: string) {
+    return code.startsWith("cc-") ? `CC ${code.slice(3).toUpperCase()}` : code.toUpperCase();
+}
+
 // Places its children on the map at `position`, moving with the map as it pans and zooms.
 // Must be rendered inside <GoogleMap> so useMap() finds the map.
 function MapOverlay({ position, children }: { position: google.maps.LatLng; children: ReactNode }) {
@@ -104,13 +158,15 @@ function MapOverlay({ position, children }: { position: google.maps.LatLng; chil
     const [container] = useState(() => {
         const div = document.createElement("div");
         div.style.position = "absolute";
-        // Never catch the mouse, or hovering the tooltip would end the hover that opened it.
+        // The container itself has no size; only the children that opt in catch the mouse.
         div.style.pointerEvents = "none";
         return div;
     });
 
     useEffect(() => {
         if (!map) return;
+        // Clicks, drags and scrolling on the overlay stay on it instead of moving the map.
+        google.maps.OverlayView.preventMapHitsAndGesturesFrom(container);
         const overlay = new google.maps.OverlayView();
         // The float pane sits above the markers and their labels.
         overlay.onAdd = () => overlay.getPanes()?.floatPane.appendChild(container);
@@ -128,8 +184,18 @@ function MapOverlay({ position, children }: { position: google.maps.LatLng; chil
     return createPortal(children, container);
 }
 
+interface ObservationTooltipProps {
+    observation: CottontailRow;
+    onMouseEnter: () => void;
+    onMouseLeave: () => void;
+}
+
 // The card shown next to a single observation while it's hovered.
-function ObservationTooltip({ observation }: { observation: CottontailRow }) {
+function ObservationTooltip({ observation, onMouseEnter, onMouseLeave }: ObservationTooltipProps) {
+    // Which of PHOTO_EXTENSIONS is being tried; past the end means no photo could be found.
+    const [extensionIndex, setExtensionIndex] = useState(0);
+    const showPhoto = hasLivingPhoto(observation) && extensionIndex < PHOTO_EXTENSIONS.length;
+
     const lifeStage = observation.lifeStage === null ? null : LIFE_STAGES[observation.lifeStage];
     const details = [
         lifeStage,
@@ -139,14 +205,30 @@ function ObservationTooltip({ observation }: { observation: CottontailRow }) {
 
     return (
         // Sits to the right of the dot, vertically centered on it, with a caret pointing back at it.
-        <div className="absolute left-0 top-0 translate-x-3 -translate-y-1/2">
-            <div className="relative whitespace-nowrap rounded-xl bg-white px-4 py-2 text-gray-900 shadow-lg ring-1 ring-black/5 dark:bg-gray-800 dark:text-gray-100 dark:ring-white/10">
-                <div className="absolute left-0 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rotate-45 bg-white dark:bg-gray-800" />
-                <p className="relative text-lg font-semibold italic leading-tight">{observation.species}</p>
-                <p className="relative text-sm text-gray-600 dark:text-gray-300">{details}</p>
-                <p className="relative text-xs text-gray-500 dark:text-gray-400">
-                    {observation.stateProvince} · by {observation.author}
-                </p>
+        <div
+            className="pointer-events-auto absolute left-0 top-0 translate-x-4 -translate-y-1/2"
+            onMouseEnter={onMouseEnter}
+            onMouseLeave={onMouseLeave}
+        >
+            <div className="relative flex items-center gap-4 whitespace-nowrap rounded-2xl bg-white p-3 pr-5 text-gray-900 shadow-xl ring-1 ring-black/5 dark:bg-gray-800 dark:text-gray-100 dark:ring-white/10">
+                <div className="absolute left-0 top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rotate-45 bg-white dark:bg-gray-800" />
+                {showPhoto && (
+                    <img
+                        src={photoUrl(observation.photoID, PHOTO_EXTENSIONS[extensionIndex])}
+                        alt={`Photo of the observed ${observation.species}`}
+                        className="relative h-32 w-32 shrink-0 rounded-xl bg-gray-100 object-cover dark:bg-gray-700"
+                        // Wrong extension: try the next one, and leave the image out once they run out.
+                        onError={() => setExtensionIndex((i) => i + 1)}
+                    />
+                )}
+                <div className={`relative ${showPhoto ? "" : "pl-2"}`}>
+                    <p className="text-xl font-semibold italic leading-tight">{observation.species}</p>
+                    <p className="mt-1 text-base text-gray-600 dark:text-gray-300">{details}</p>
+                    <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
+                        {observation.stateProvince} · by {observation.author}
+                        {showPhoto && observation.photoLicenseCode && ` · ${formatLicense(observation.photoLicenseCode)}`}
+                    </p>
+                </div>
             </div>
         </div>
     );
@@ -156,8 +238,21 @@ function ObservationTooltip({ observation }: { observation: CottontailRow }) {
 // Must be rendered inside <GoogleMap> so useMap() finds the map.
 function ObservationLayer({ points, species }: { points: CottontailRow[]; species: string[] }) {
     const map = useMap();
-    // The single observation under the mouse, and where its dot is.
+    // The single observation under the mouse (or whose tooltip is), and where its dot is.
     const [hovered, setHovered] = useState<{ observation: CottontailRow; position: google.maps.LatLng } | null>(null);
+
+    // Leaving a dot closes its tooltip after a short delay, which entering the tooltip cancels.
+    const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    const cancelHide = useCallback(() => clearTimeout(hideTimer.current), []);
+    const scheduleHide = useCallback(() => {
+        clearTimeout(hideTimer.current);
+        hideTimer.current = setTimeout(() => setHovered(null), TOOLTIP_HIDE_DELAY);
+    }, []);
+    const hideNow = useCallback(() => {
+        clearTimeout(hideTimer.current);
+        setHovered(null);
+    }, []);
+    useEffect(() => cancelHide, [cancelHide]);
 
     const byId = useMemo(() => new Map(points.map((d) => [d.occurrenceID, d])), [points]);
 
@@ -170,7 +265,7 @@ function ObservationLayer({ points, species }: { points: CottontailRow[]; specie
                 points.filter((d) => d.species === sp).map((d) => ({
                     type: "Feature",
                     geometry: { type: "Point", coordinates: [d.decimalLongitude, d.decimalLatitude] },
-                    properties: { occurrenceID: d.occurrenceID, species: d.species }
+                    properties: { occurrenceID: d.occurrenceID, species: d.species, hasPhoto: hasLivingPhoto(d) }
                 }))
             )
         ])),
@@ -210,6 +305,11 @@ function ObservationLayer({ points, species }: { points: CottontailRow[]; specie
                     zIndex,
                     title: `${d3.format(",")(count)} ${sp} observations (click to zoom in)`
                 };
+            }
+
+            // Observations with a photo of a living bunny get a camera badge on their dot.
+            if (feature.getProperty("hasPhoto")) {
+                return { icon: photoDotIcon(speciesColor(sp)), zIndex };
             }
 
             return {
@@ -306,11 +406,12 @@ function ObservationLayer({ points, species }: { points: CottontailRow[]; specie
             const observation = byId.get(e.feature.getProperty("occurrenceID") as number);
             const geometry = e.feature.getGeometry();
             if (!observation || !(geometry instanceof google.maps.Data.Point)) return;
+            cancelHide();
             setHovered({ observation, position: geometry.get() });
         });
-        const outListener = layer.addListener("mouseout", () => setHovered(null));
+        const outListener = layer.addListener("mouseout", scheduleHide);
         // Zooming can swap the hovered dot into a cluster without a mouseout, so close the tooltip.
-        const zoomListener = map.addListener("zoom_changed", () => setHovered(null));
+        const zoomListener = map.addListener("zoom_changed", hideNow);
 
         return () => {
             idleListener.remove();
@@ -319,13 +420,19 @@ function ObservationLayer({ points, species }: { points: CottontailRow[]; specie
             outListener.remove();
             zoomListener.remove();
             layer.setMap(null);
-            setHovered(null);
+            hideNow();
         };
-    }, [map, points, species, indexes, byId]);
+    }, [map, points, species, indexes, byId, cancelHide, scheduleHide, hideNow]);
 
     return hovered && (
         <MapOverlay position={hovered.position}>
-            <ObservationTooltip observation={hovered.observation} />
+            <ObservationTooltip
+                // A fresh tooltip per observation, so it starts its photo search over.
+                key={hovered.observation.occurrenceID}
+                observation={hovered.observation}
+                onMouseEnter={cancelHide}
+                onMouseLeave={scheduleHide}
+            />
         </MapOverlay>
     );
 }
@@ -398,12 +505,20 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
                 <span>
                     Observations: {d3.format(",")(mode === "points" ? visiblePoints.length : heatmapPoints.length)}
                 </span>
-                {mode === "points" ? species.map((sp) => (
-                    <span key={sp} className="flex items-center gap-1">
-                        <span className="inline-block w-3 h-3 rounded-full" style={{ background: speciesColor(sp) }} />
-                        <i>{sp}</i>
-                    </span>
-                )) : heatmapSpecies.length > 0 && (
+                {mode === "points" ? (
+                    <>
+                        {species.map((sp) => (
+                            <span key={sp} className="flex items-center gap-1">
+                                <span className="inline-block w-3 h-3 rounded-full" style={{ background: speciesColor(sp) }} />
+                                <i>{sp}</i>
+                            </span>
+                        ))}
+                        <span className="flex items-center gap-1 text-gray-600 dark:text-gray-400">
+                            <img src={CAMERA_BADGE_URL} alt="" className="h-[13px] w-[13px]" />
+                            has a photo (hover to see it)
+                        </span>
+                    </>
+                ) : heatmapSpecies.length > 0 && (
                     <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                         <i>{heatmapSpecies[0]}</i>
                         <span className="inline-block h-3 w-32 rounded-sm" style={{ background: speciesMixGradient(heatmapSpecies) }} />

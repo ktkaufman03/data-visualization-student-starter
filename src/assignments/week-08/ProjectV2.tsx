@@ -45,8 +45,9 @@ export function ProjectV2() {
                     day: +row.day,
                     month: +row.month,
                     year: +row.year,
-                    mainPhotoID: +row.mainPhotoID,
-                    license: row.license || null,
+                    licenseCode: row.licenseCode || null,
+                    photoID: +row.photoID,
+                    photoLicenseCode: row.photoLicenseCode || null,
                     author: row.author ?? ""
                 }));
                 setData(converted);

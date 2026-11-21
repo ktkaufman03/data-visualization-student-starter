@@ -13,8 +13,11 @@ export interface CottontailRow {
     day: number;
     month: number;
     year: number;
-    mainPhotoID: number;
-    // Photo license code (e.g. "cc-by-nc"), or null if none was given.
-    license: string | null;
+    // The observation's license code (e.g. "cc-by-nc"), or null if none was given.
+    licenseCode: string | null;
+    // The observation's primary photo.
+    photoID: number;
+    // The primary photo's license code (e.g. "cc-by-nc"), or null if none was given.
+    photoLicenseCode: string | null;
     author: string;
 }
