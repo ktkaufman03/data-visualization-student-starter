@@ -9,7 +9,7 @@ import statesTopology from 'us-atlas/states-10m.json';
 import type { CottontailRow } from './types';
 import { isGenusOnly, speciesColor } from './species';
 import { DensityHeatmap } from './DensityHeatmap';
-import { TimeRangeSlider, type TimeRangeSliderProps } from './TimeRangeSlider';
+import { TimeRangeSlider } from './TimeRangeSlider';
 import { useTimeFilter } from './useTimeFilter';
 import { useTheme } from '../../helpers/theme';
 
@@ -685,34 +685,24 @@ function speciesMixGradient(species: string[]) {
     return `linear-gradient(to right, ${d3.range(0, 1.01, 0.1).map((t) => mix(t)).join(", ")})`;
 }
 
-interface MapSettingsProps {
-    mode: MapMode;
-    onModeChange: (mode: MapMode) => void;
-    timeSlider: TimeRangeSliderProps | null;
-}
-
-function MapSettings({ mode, onModeChange, timeSlider }: MapSettingsProps) {
+function MapModeToggle({ mode, onModeChange }: { mode: MapMode; onModeChange: (mode: MapMode) => void }) {
     const radioName = useId();
 
     return (
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-            <div role="radiogroup" aria-label="Map style" className="flex items-center gap-3 rounded border border-gray-300 px-2 py-1 dark:border-gray-600">
-                {([["points", "Points"], ["heatmap", "Heatmap"]] as const).map(([value, label]) => (
-                    <label key={value} className="flex items-center gap-1 cursor-pointer">
-                        <input
-                            type="radio"
-                            name={radioName}
-                            value={value}
-                            checked={mode === value}
-                            onChange={() => onModeChange(value)}
-                            className="accent-black cursor-pointer dark:accent-white"
-                        />
-                        {label}
-                    </label>
-                ))}
-            </div>
-
-            {timeSlider && <TimeRangeSlider {...timeSlider} />}
+        <div role="radiogroup" aria-label="Map style" className="flex w-fit items-center gap-3 rounded border border-gray-300 px-2 py-1 text-sm dark:border-gray-600">
+            {([["points", "Points"], ["heatmap", "Heatmap"]] as const).map(([value, label]) => (
+                <label key={value} className="flex items-center gap-1 cursor-pointer">
+                    <input
+                        type="radio"
+                        name={radioName}
+                        value={value}
+                        checked={mode === value}
+                        onChange={() => onModeChange(value)}
+                        className="accent-black cursor-pointer dark:accent-white"
+                    />
+                    {label}
+                </label>
+            ))}
         </div>
     );
 }
@@ -766,7 +756,9 @@ function LegendToggle({ pressed, onClick, onPreview, children }: LegendTogglePro
             onMouseLeave={() => onPreview(false)}
             onFocus={() => onPreview(true)}
             onBlur={() => onPreview(false)}
-            className={`-mx-1.5 flex cursor-pointer items-center gap-1 rounded-full px-1.5 py-0.5 ${
+            // The negative margins cancel the padding, so the pill's highlight doesn't make the
+            // legend row taller (or wider) than the plain heatmap legend.
+            className={`-mx-1.5 -my-0.5 flex cursor-pointer items-center gap-1 rounded-full px-1.5 py-0.5 ${
                 pressed
                     ? "bg-gray-200 ring-1 ring-gray-400 dark:bg-gray-700 dark:ring-gray-500"
                     : "hover:bg-gray-100 dark:hover:bg-gray-800"
@@ -775,56 +767,6 @@ function LegendToggle({ pressed, onClick, onPreview, children }: LegendTogglePro
         >
             {children}
         </button>
-    );
-}
-
-// The applied filters, each removable on its own.
-function FilterChips({ filters, onRemove, onClear }: { filters: Filter[]; onRemove: (f: Filter) => void; onClear: () => void }) {
-    return (
-        <div className="flex min-h-7 flex-wrap items-center gap-2 text-sm">
-            <span className="text-gray-600 dark:text-gray-400">Filters:</span>
-            {filters.length === 0 && (
-                <span className="text-gray-500">none · click a legend entry to add one</span>
-            )}
-            {filters.map((f) => {
-                const label = f.kind === "species" ? f.species : TRAITS[f.trait].label;
-                return (
-                    <span
-                        key={filterKey(f)}
-                        className="inline-flex items-center gap-1 rounded-full border border-gray-300 bg-gray-100 py-0.5 pl-2.5 pr-1 dark:border-gray-600 dark:bg-gray-800"
-                    >
-                        {f.kind === "species" ? (
-                            <>
-                                <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: speciesColor(f.species) }} />
-                                <i>{label}</i>
-                            </>
-                        ) : (
-                            <>
-                                <img src={BADGE_URLS[f.trait]} alt="" className="h-[13px] w-[13px]" />
-                                {label}
-                            </>
-                        )}
-                        <button
-                            type="button"
-                            aria-label={`Remove filter: ${label}`}
-                            className="flex h-5 w-5 cursor-pointer items-center justify-center rounded-full text-base leading-none text-gray-500 hover:bg-gray-300 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-600 dark:hover:text-gray-100"
-                            onClick={() => onRemove(f)}
-                        >
-                            ×
-                        </button>
-                    </span>
-                );
-            })}
-            {filters.length > 1 && (
-                <button
-                    type="button"
-                    className="cursor-pointer text-gray-600 underline underline-offset-2 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
-                    onClick={onClear}
-                >
-                    Clear all
-                </button>
-            )}
-        </div>
     );
 }
 
@@ -845,7 +787,7 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
         const counts = d3.rollup((data ?? []).filter(isMappable), (v) => v.length, (d) => d.species);
         return [...species].sort((a, b) => (counts.get(b) ?? 0) - (counts.get(a) ?? 0));
     }, [data, species]);
-    // In the order they were added, so new chips go on the end.
+    // In the order they were added, so "Undo last filter" can take off the newest.
     const [filters, setFilters] = useState<Filter[]>([]);
     const isActive = (f: Filter) => filters.some((g) => filterKey(g) === filterKey(f));
     const removeFilter = (f: Filter) => setFilters((fs) => fs.filter((g) => filterKey(g) !== filterKey(f)));
@@ -872,6 +814,16 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
         [filtered]
     );
     const shownCount = mode === "points" ? visiblePoints.length : heatmapPoints.length;
+    // What the count is out of: everything this mode could show, with no filters or time range.
+    const totalCount = useMemo(() => {
+        const mappable = (data ?? []).filter(isMappable);
+        return {
+            points: mappable.length,
+            heatmap: mappable.filter((d) => !isGenusOnly(d.species)).length
+        };
+    }, [data]);
+    const formatCount = d3.format(",");
+    const total = formatCount(totalCount[mode]);
     // Only once the data has loaded, and only when filters are on, since that's what the warning offers to undo.
     const filteredToNothing = mode === "points" && data !== null && filters.length > 0 && shownCount === 0;
 
@@ -883,9 +835,15 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
 
     return (
         <div className="flex flex-col w-full h-full gap-2">
+            <MapModeToggle mode={mode} onModeChange={changeMode} />
+
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
                 <span>
-                    Observations: {d3.format(",")(shownCount)}
+                    {/* As wide as the total, so the legend after it stays put as the count changes. */}
+                    <span className="inline-block text-right tabular-nums" style={{ minWidth: `${total.length}ch` }}>
+                        {formatCount(shownCount)}
+                    </span>
+                    {" "}of {total} observations
                 </span>
                 {mode === "points" ? (
                     <>
@@ -920,11 +878,11 @@ export function GeographyMap({ data }: { data: CottontailRow[] | null }) {
                 )}
             </div>
 
-            {mode === "points" && (
-                <FilterChips filters={filters} onRemove={removeFilter} onClear={() => setFilters([])} />
+            {timeSlider && (
+                <div className="text-sm">
+                    <TimeRangeSlider {...timeSlider} />
+                </div>
             )}
-
-            <MapSettings mode={mode} onModeChange={changeMode} timeSlider={timeSlider} />
 
             <div className="relative flex-1 min-h-0 overflow-hidden rounded">
                 {filteredToNothing && (
